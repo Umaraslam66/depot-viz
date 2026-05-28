@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+    <title>Rail Scenario Planner</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <canvas class="scene-canvas" aria-label="3D rail scenario planning canvas"></canvas>
+
+      <aside class="side-panel" aria-label="Rail scenario controls">
+        <header class="panel-header">
+          <div>
+            <p class="eyebrow">Stakeholder Operations Demo</p>
+            <h1>Rail Scenario Planner</h1>
+          </div>
+          <div class="status-pill">
+            <span>Status</span>
+            <strong id="run-status">Running</strong>
+          </div>
+        </header>
+
+        <section class="panel-section">
+          <h2>Build</h2>
+          <div class="tool-grid" aria-label="Placement tools">
+            <button class="tool-button is-active" type="button" data-tool="straight">Straight</button>
+            <button class="tool-button" type="button" data-tool="curve">Curve</button>
+            <button class="tool-button" type="button" data-tool="turnout">Turnout</button>
+            <button class="tool-button" type="button" data-tool="station">Station</button>
+            <button class="tool-button" type="button" data-tool="signal">Signal</button>
+            <button class="tool-button" type="button" data-tool="train">Train</button>
+            <button class="tool-button tool-button--wide" type="button" data-tool="conflict">Conflict</button>
+          </div>
+          <div class="compact-row">
+            <button id="rotate-tool" type="button">Rotate</button>
+            <button id="clear-selection" type="button">Clear</button>
+          </div>
+          <p class="hint">Click the canvas to place the selected item on the snapped planning grid.</p>
+        </section>
+
+        <section class="panel-section">
+          <h2>Operations</h2>
+          <div class="transport-row">
+            <button id="play-pause" type="button">Pause</button>
+            <button id="reset-time" type="button">Reset</button>
+            <button id="follow-train" type="button">Follow</button>
+          </div>
+          <label class="slider-row" for="scenario-speed">
+            <span>Timeline speed</span>
+            <strong id="scenario-speed-value">1.00x</strong>
+          </label>
+          <input id="scenario-speed" type="range" min="0" max="2.5" step="0.05" value="1" />
+        </section>
+
+        <section class="panel-section">
+          <h2>Selected Train</h2>
+          <label class="field-label" for="train-name">Name</label>
+          <input id="train-name" class="text-input" type="text" maxlength="24" value="IC-214" />
+          <div class="compact-row">
+            <button id="rename-train" type="button">Rename</button>
+            <button id="next-train" type="button">Next train</button>
+          </div>
+        </section>
+
+        <section class="panel-section">
+          <h2>Overlays</h2>
+          <label class="check-row">
+            <input id="overlay-labels" type="checkbox" checked />
+            <span>Labels</span>
+          </label>
+          <label class="check-row">
+            <input id="overlay-conflicts" type="checkbox" checked />
+            <span>Conflicts</span>
+          </label>
+          <label class="check-row">
+            <input id="overlay-blocks" type="checkbox" checked />
+            <span>Block occupancy</span>
+          </label>
+          <label class="check-row">
+            <input id="overlay-paths" type="checkbox" checked />
+            <span>Train paths</span>
+          </label>
+        </section>
+
+        <section class="panel-section">
+          <h2>Camera</h2>
+          <div class="preset-grid" aria-label="Camera presets">
+            <button type="button" data-preset="overview">Overview</button>
+            <button type="button" data-preset="station">Station</button>
+            <button type="button" data-preset="junction">Junction</button>
+            <button type="button" data-preset="blocks">Blocks</button>
+          </div>
+        </section>
+
+        <section class="panel-section panel-section--readout">
+          <h2>Scenario Readout</h2>
+          <ul id="scenario-readout" class="readout-list"></ul>
+          <button id="share-scenario" class="button-wide" type="button">Copy share URL</button>
+        </section>
+      </aside>
+    </div>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+        }
+      }
+    </script>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
