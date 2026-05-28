@@ -23,7 +23,30 @@
           </div>
         </header>
 
-        <section class="panel-section">
+        <section class="panel-section presentation-actions">
+          <button id="presentation-mode" type="button">Presentation mode</button>
+          <button id="export-screenshot" type="button">Export PNG</button>
+        </section>
+
+        <section class="panel-section panel-section--kpi">
+          <h2>Scenario KPIs</h2>
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <span>Trains</span>
+              <strong id="kpi-trains">0</strong>
+            </div>
+            <div class="kpi-card">
+              <span>Conflicts</span>
+              <strong id="kpi-conflicts">0</strong>
+            </div>
+            <div class="kpi-card">
+              <span>Warnings</span>
+              <strong id="kpi-warnings">0</strong>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel-section edit-only">
           <h2>Build</h2>
           <div class="tool-grid" aria-label="Placement tools">
             <button class="tool-button is-active" type="button" data-tool="straight">Straight</button>
@@ -41,7 +64,7 @@
           <p class="hint">Click the canvas to place the selected item on the snapped planning grid.</p>
         </section>
 
-        <section class="panel-section">
+        <section class="panel-section edit-only">
           <h2>Edit</h2>
           <label class="check-row">
             <input id="snap-enabled" type="checkbox" checked />
@@ -59,7 +82,54 @@
           <button id="reset-demo" class="button-wide button-secondary" type="button">Reset demo</button>
         </section>
 
-        <section class="panel-section">
+        <section class="panel-section edit-only">
+          <h2>Properties</h2>
+          <p id="properties-empty" class="hint">Select a module, train, or conflict to edit details.</p>
+
+          <div id="module-properties" class="properties-panel" hidden>
+            <label class="field-label" for="module-name">Module name</label>
+            <input id="module-name" class="text-input" type="text" maxlength="28" />
+            <div class="property-readout">
+              <span>Type</span>
+              <strong id="module-type">-</strong>
+            </div>
+            <label class="slider-row slider-row--spaced" for="module-rotation">
+              <span>Rotation</span>
+              <strong id="module-rotation-value">0 deg</strong>
+            </label>
+            <input id="module-rotation" type="range" min="0" max="270" step="90" value="0" />
+            <button id="reconnect-module" class="button-wide button-secondary" type="button">Reconnect nearby ports</button>
+          </div>
+
+          <div id="train-properties" class="properties-panel" hidden>
+            <label class="field-label" for="train-color">Train color</label>
+            <input id="train-color" class="color-input" type="color" value="#2563eb" />
+          </div>
+
+          <div id="conflict-properties" class="properties-panel" hidden>
+            <label class="field-label" for="conflict-label">Conflict label</label>
+            <input id="conflict-label" class="text-input" type="text" maxlength="42" />
+            <label class="field-label field-label--spaced" for="conflict-type">Type</label>
+            <select id="conflict-type" class="text-input">
+              <option value="headway">Headway</option>
+              <option value="junction">Junction</option>
+              <option value="platform">Platform</option>
+              <option value="blocked">Blocked section</option>
+              <option value="delay">Delay propagation</option>
+            </select>
+            <label class="field-label field-label--spaced" for="conflict-severity">Severity</label>
+            <select id="conflict-severity" class="text-input">
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+            <label class="check-row">
+              <input id="conflict-active" type="checkbox" checked />
+              <span>Conflict active</span>
+            </label>
+          </div>
+        </section>
+
+        <section class="panel-section edit-only">
           <h2>Operations</h2>
           <div class="transport-row">
             <button id="play-pause" type="button">Pause</button>
@@ -73,7 +143,7 @@
           <input id="scenario-speed" type="range" min="0" max="2.5" step="0.05" value="1" />
         </section>
 
-        <section class="panel-section">
+        <section class="panel-section edit-only">
           <h2>Selected Train</h2>
           <label class="field-label" for="train-name">Name</label>
           <input id="train-name" class="text-input" type="text" maxlength="24" value="IC-214" />
@@ -133,6 +203,21 @@
             <button type="button" data-preset="station">Station</button>
             <button type="button" data-preset="junction">Junction</button>
             <button type="button" data-preset="blocks">Blocks</button>
+          </div>
+        </section>
+
+        <section class="panel-section panel-section--validation">
+          <h2>Validation Issues</h2>
+          <ul id="validation-list" class="issue-list"></ul>
+        </section>
+
+        <section class="panel-section panel-section--legend">
+          <h2>Legend</h2>
+          <div class="legend-grid">
+            <span><i class="legend-swatch legend-swatch--path"></i>Train path</span>
+            <span><i class="legend-swatch legend-swatch--block"></i>Occupied block</span>
+            <span><i class="legend-swatch legend-swatch--conflict"></i>Conflict</span>
+            <span><i class="legend-swatch legend-swatch--validation"></i>Validation</span>
           </div>
         </section>
 

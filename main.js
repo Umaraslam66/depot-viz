@@ -34,6 +34,26 @@ const connectionsToggle = document.querySelector("#overlay-connections");
 const validationToggle = document.querySelector("#overlay-validation");
 const readoutList = document.querySelector("#scenario-readout");
 const shareButton = document.querySelector("#share-scenario");
+const presentationModeButton = document.querySelector("#presentation-mode");
+const exportScreenshotButton = document.querySelector("#export-screenshot");
+const kpiTrains = document.querySelector("#kpi-trains");
+const kpiConflicts = document.querySelector("#kpi-conflicts");
+const kpiWarnings = document.querySelector("#kpi-warnings");
+const propertiesEmpty = document.querySelector("#properties-empty");
+const moduleProperties = document.querySelector("#module-properties");
+const trainProperties = document.querySelector("#train-properties");
+const conflictProperties = document.querySelector("#conflict-properties");
+const moduleNameInput = document.querySelector("#module-name");
+const moduleTypeReadout = document.querySelector("#module-type");
+const moduleRotationInput = document.querySelector("#module-rotation");
+const moduleRotationValue = document.querySelector("#module-rotation-value");
+const reconnectModuleButton = document.querySelector("#reconnect-module");
+const trainColorInput = document.querySelector("#train-color");
+const conflictLabelInput = document.querySelector("#conflict-label");
+const conflictTypeSelect = document.querySelector("#conflict-type");
+const conflictSeveritySelect = document.querySelector("#conflict-severity");
+const conflictActiveInput = document.querySelector("#conflict-active");
+const validationList = document.querySelector("#validation-list");
 
 let renderer;
 try {
@@ -215,6 +235,7 @@ let toolRotation = 0;
 let followingTrain = false;
 let urlUpdateTimer = 0;
 let currentPlacementPreview = null;
+let dragState = null;
 const undoStack = [];
 const redoStack = [];
 const maxHistoryEntries = 40;
@@ -226,6 +247,7 @@ const appState = {
   time: 0,
   speed: Number(speedInput?.value ?? 1),
   snapEnabled: true,
+  presentationMode: false,
   overlays: {
     labels: true,
     conflicts: true,
@@ -333,6 +355,7 @@ const defaultScenario = {
     preset: "overview",
     speed: 1,
     snapEnabled: true,
+    presentationMode: false,
     overlays: {
       labels: true,
       conflicts: true,
@@ -412,6 +435,7 @@ function encodeScenario() {
       preset: scenario.view.preset,
       speed: appState.speed,
       snapEnabled: appState.snapEnabled,
+      presentationMode: appState.presentationMode,
       overlays: appState.overlays,
     },
   };
@@ -440,6 +464,7 @@ function captureEditorState() {
       time: appState.time,
       speed: appState.speed,
       snapEnabled: appState.snapEnabled,
+      presentationMode: appState.presentationMode,
       overlays: { ...appState.overlays },
     },
     activeTool,
@@ -456,6 +481,7 @@ function restoreEditorState(editorState) {
   appState.time = editorState.appState.time;
   appState.speed = editorState.appState.speed;
   appState.snapEnabled = editorState.appState.snapEnabled;
+  appState.presentationMode = editorState.appState.presentationMode;
   appState.overlays = { ...editorState.appState.overlays };
   activeTool = editorState.activeTool;
   toolRotation = editorState.toolRotation;
@@ -525,6 +551,30 @@ function createGround() {
     new THREE.Vector3(0, 0.035, 28),
   ]);
   scene.add(new THREE.LineSegments(axisGeometry, axisMaterial));
+
+  createLabelSprite("N", new THREE.Vector3(34, 1.5, -21), { scaleX: 1.1, scaleY: 0.72, fontSize: 48 });
+  createLabelSprite("100 m", new THREE.Vector3(30, 1.2, 24), { scaleX: 2.1, scaleY: 0.68, fontSize: 38 });
+  createLabelSprite("SECTION A", new THREE.Vector3(-26, 1.1, -18), { scaleX: 3.0, scaleY: 0.7, fontSize: 34 });
+  createLabelSprite("SECTION B", new THREE.Vector3(18, 1.1, 18), { scaleX: 3.0, scaleY: 0.7, fontSize: 34 });
+
+  const scaleMaterial = new THREE.MeshBasicMaterial({ color: 0x334155 });
+  const scaleBar = new THREE.Mesh(new THREE.BoxGeometry(7.5, 0.05, 0.16), scaleMaterial);
+  scaleBar.position.set(30, 0.12, 22.5);
+  scene.add(scaleBar);
+  const northStem = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.08, 4.4), scaleMaterial);
+  northStem.position.set(34, 0.12, -18.5);
+  scene.add(northStem);
+  const northHead = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.2, 3), scaleMaterial);
+  northHead.position.set(34, 0.2, -21.0);
+  northHead.rotation.x = Math.PI * 0.5;
+  scene.add(northHead);
+}
+
+function createMapAnnotations() {
+  createLabelSprite("N", new THREE.Vector3(34, 1.5, -21), { scaleX: 1.1, scaleY: 0.72, fontSize: 48 });
+  createLabelSprite("100 m", new THREE.Vector3(30, 1.2, 24), { scaleX: 2.1, scaleY: 0.68, fontSize: 38 });
+  createLabelSprite("SECTION A", new THREE.Vector3(-26, 1.1, -18), { scaleX: 3.0, scaleY: 0.7, fontSize: 34 });
+  createLabelSprite("SECTION B", new THREE.Vector3(18, 1.1, 18), { scaleX: 3.0, scaleY: 0.7, fontSize: 34 });
 }
 
 function createTextTexture(textValue, options = {}) {
@@ -646,6 +696,9 @@ function createTrackModuleObject(moduleRecord) {
     addBox(moduleGroup, [8.8, 0.42, 1.35], [0, 0.26, 1.92], materials.platform);
     addBox(moduleGroup, [8.8, 0.12, 0.12], [0, 0.54, 1.22], materials.platformEdge);
     addBox(moduleGroup, [2.3, 1.08, 1.05], [-2.5, 0.86, 2.02], materials.station);
+    addBox(moduleGroup, [1.9, 0.1, 0.12], [1.8, 1.16, 1.34], materials.signalMast);
+    addBox(moduleGroup, [0.12, 1.16, 0.12], [0.9, 0.68, 1.34], materials.signalMast);
+    addBox(moduleGroup, [0.12, 1.16, 0.12], [2.7, 0.68, 1.34], materials.signalMast);
     createLabelSprite(moduleRecord.name ?? "Station", worldPosition(moduleRecord, 0, 2.55, 2.85), { scaleX: 4.4, scaleY: 1.05, fontSize: 42 });
   } else if (moduleRecord.type === "signal") {
     addBox(moduleGroup, [0.28, 2.2, 0.28], [0, 1.1, 0], materials.signalMast);
@@ -666,6 +719,8 @@ function createTrackModuleObject(moduleRecord) {
     moduleGroup.add(selectionRing);
   }
 
+  addBufferStopsForOpenPorts(moduleRecord, moduleGroup);
+  setObjectUserData(moduleGroup, "module", moduleRecord.id);
   return moduleGroup;
 }
 
@@ -835,6 +890,24 @@ function moduleOverlaps(moduleRecord, excludeModuleId = null) {
   });
 }
 
+function addBufferStopsForOpenPorts(moduleRecord, moduleGroup) {
+  getWorldPorts(moduleRecord).forEach((portRecord) => {
+    if (isPortConnected(moduleRecord.id, portRecord.id)) {
+      return;
+    }
+    const localPort = getModulePortDefinitions(moduleRecord.type).find((definitionRecord) => definitionRecord.id === portRecord.id);
+    if (!localPort) {
+      return;
+    }
+    const bufferGroup = new THREE.Group();
+    bufferGroup.position.set(localPort.local[0], 0.42, localPort.local[1]);
+    bufferGroup.rotation.y = Math.atan2(localPort.direction[1], localPort.direction[0]);
+    addBox(bufferGroup, [0.22, 0.5, 1.72], [0, 0, 0], materials.signalMast);
+    addBox(bufferGroup, [0.34, 0.18, 1.95], [-0.25, 0.36, 0], materials.platformEdge);
+    moduleGroup.add(bufferGroup);
+  });
+}
+
 function createConflictObject(conflictRecord) {
   const conflictGroup = new THREE.Group();
   conflictGroup.userData.overlayType = "conflicts";
@@ -880,6 +953,7 @@ function createConflictObject(conflictRecord) {
     scaleY: 1.05,
     fontSize: 36,
   });
+  setObjectUserData(conflictGroup, "conflict", conflictRecord.id);
   return conflictGroup;
 }
 
@@ -1033,6 +1107,9 @@ function createTrainObject(trainRecord) {
 
   addBox(group, [2.35, 0.72, 0.92], [0, 0.68, 0], bodyMaterial);
   addBox(group, [2.0, 0.16, 0.78], [0, 1.12, 0], roofMaterial);
+  addBox(group, [0.28, 0.5, 0.84], [1.25, 0.72, 0], roofMaterial);
+  addBox(group, [0.12, 0.18, 0.18], [1.42, 0.78, -0.26], materials.signalGreen);
+  addBox(group, [0.12, 0.18, 0.18], [1.42, 0.78, 0.26], materials.signalGreen);
   [-0.62, 0, 0.62].forEach((xValue) => {
     addBox(group, [0.32, 0.24, 0.04], [xValue, 0.78, 0.48], windowMaterial);
     addBox(group, [0.32, 0.24, 0.04], [xValue, 0.78, -0.48], windowMaterial);
@@ -1058,6 +1135,7 @@ function createTrainObject(trainRecord) {
   halo.position.y = 0.04;
   group.add(halo);
 
+  setObjectUserData(group, "train", trainRecord.id);
   return group;
 }
 
@@ -1108,12 +1186,81 @@ function updateTrainNameInput() {
   if (trainEnabledInput && selectedTrain) {
     trainEnabledInput.checked = selectedTrain.enabled;
   }
+  if (trainColorInput && selectedTrain) {
+    trainColorInput.value = selectedTrain.color;
+  }
+  updatePropertiesPanel();
+}
+
+function updatePropertiesPanel() {
+  const selectedObject = getSelectedObject();
+  const selectedModule = selectedObject?.type === "module" ? getModuleById(selectedObject.id) : null;
+  const selectedTrain = selectedObject?.type === "train"
+    ? scenario.trains.find((trainRecord) => trainRecord.id === selectedObject.id)
+    : null;
+  const selectedConflict = selectedObject?.type === "conflict"
+    ? scenario.conflicts.find((conflictRecord) => conflictRecord.id === selectedObject.id)
+    : null;
+
+  if (propertiesEmpty) {
+    propertiesEmpty.hidden = Boolean(selectedModule || selectedTrain || selectedConflict);
+  }
+  if (moduleProperties) {
+    moduleProperties.hidden = !selectedModule;
+  }
+  if (trainProperties) {
+    trainProperties.hidden = !selectedTrain;
+  }
+  if (conflictProperties) {
+    conflictProperties.hidden = !selectedConflict;
+  }
+
+  if (selectedModule) {
+    if (moduleNameInput) {
+      moduleNameInput.value = selectedModule.name ?? "";
+    }
+    if (moduleTypeReadout) {
+      moduleTypeReadout.textContent = selectedModule.type;
+    }
+    const rotationDegrees = Math.round(((selectedModule.rotation ?? 0) * 180) / Math.PI) % 360;
+    if (moduleRotationInput) {
+      moduleRotationInput.value = String(rotationDegrees < 0 ? rotationDegrees + 360 : rotationDegrees);
+    }
+    if (moduleRotationValue) {
+      moduleRotationValue.textContent = `${rotationDegrees < 0 ? rotationDegrees + 360 : rotationDegrees} deg`;
+    }
+  }
+
+  if (selectedConflict) {
+    if (conflictLabelInput) {
+      conflictLabelInput.value = selectedConflict.label;
+    }
+    if (conflictTypeSelect) {
+      conflictTypeSelect.value = selectedConflict.type;
+    }
+    if (conflictSeveritySelect) {
+      conflictSeveritySelect.value = selectedConflict.severity;
+    }
+    if (conflictActiveInput) {
+      conflictActiveInput.checked = selectedConflict.active;
+    }
+  }
 }
 
 function updateReadout() {
   const activeConflicts = scenario.conflicts.filter((conflictRecord) => conflictRecord.active);
   const enabledTrains = scenario.trains.filter((trainRecord) => trainRecord.enabled);
   const validationWarnings = validateScenario();
+  if (kpiTrains) {
+    kpiTrains.textContent = String(enabledTrains.length);
+  }
+  if (kpiConflicts) {
+    kpiConflicts.textContent = String(activeConflicts.length);
+  }
+  if (kpiWarnings) {
+    kpiWarnings.textContent = String(validationWarnings.length);
+  }
+  renderValidationList(validationWarnings);
   const items = [
     `${enabledTrains.length} trains active across ${scenario.trackModules.length} planning objects.`,
     `${scenario.connections.length} endpoint connections, ${validationWarnings.length} validation warnings.`,
@@ -1121,7 +1268,7 @@ function updateReadout() {
   ];
 
   activeConflicts.forEach((conflictRecord) => {
-    const trainNames = conflictRecord.affectedTrainIds
+    const trainNames = (conflictRecord.affectedTrainIds ?? [])
       .map((trainId) => scenario.trains.find((trainRecord) => trainRecord.id === trainId)?.displayName)
       .filter(Boolean)
       .join(", ");
@@ -1171,10 +1318,63 @@ function pointerToGround(event) {
   return scratchVector.clone();
 }
 
+function updatePointerFromEvent(event) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+}
+
+function getPickedObject(event) {
+  updatePointerFromEvent(event);
+  const intersections = raycaster.intersectObjects([scenarioGroup, trainGroup, overlayGroup], true);
+  const pickedIntersection = intersections.find(
+    (intersectionRecord) => intersectionRecord.object.userData.objectType && intersectionRecord.object.visible,
+  );
+  if (!pickedIntersection) {
+    return null;
+  }
+  return {
+    type: pickedIntersection.object.userData.objectType,
+    id: pickedIntersection.object.userData.objectId,
+  };
+}
+
 function nextId(prefix) {
   const idValue = `${prefix}${scenario.nextId}`;
   scenario.nextId += 1;
   return idValue;
+}
+
+function getSelectedObject() {
+  if (selectedModuleId) {
+    return { type: "module", id: selectedModuleId };
+  }
+  if (selectedConflictId) {
+    return { type: "conflict", id: selectedConflictId };
+  }
+  if (selectedTrainId) {
+    return { type: "train", id: selectedTrainId };
+  }
+  return null;
+}
+
+function setSelectedObject(selectionValue) {
+  selectedModuleId = selectionValue?.type === "module" ? selectionValue.id : null;
+  selectedConflictId = selectionValue?.type === "conflict" ? selectionValue.id : null;
+  if (selectionValue?.type === "train") {
+    selectedTrainId = selectionValue.id;
+  }
+  rebuildScenario();
+}
+
+function setObjectUserData(objectValue, objectType, objectId) {
+  objectValue.userData.objectType = objectType;
+  objectValue.userData.objectId = objectId;
+  objectValue.traverse((childObject) => {
+    childObject.userData.objectType = objectType;
+    childObject.userData.objectId = objectId;
+  });
 }
 
 function addScenarioObject(positionValue) {
@@ -1290,6 +1490,65 @@ function getPlacementPlan(positionValue) {
   };
 }
 
+function getModuleMovePlan(moduleRecord, positionValue) {
+  let movedModule = {
+    ...moduleRecord,
+    position: [snapToGrid(positionValue.x), 0, snapToGrid(positionValue.z)],
+  };
+  const targetPort = appState.snapEnabled && moduleHasPorts(moduleRecord.type)
+    ? findNearestOpenPort(positionValue, moduleRecord.id)
+    : null;
+  let connection = null;
+  if (targetPort) {
+    const sourcePortId = getPreferredSourcePort(moduleRecord.type, targetPort);
+    movedModule = alignModulePortToTarget(movedModule, sourcePortId, targetPort);
+    connection = { target: targetPort, sourcePortId };
+  }
+  return { moduleRecord: movedModule, connection };
+}
+
+function moveSelectedObjectToGround(positionValue) {
+  if (!dragState) {
+    return;
+  }
+  if (!dragState.historyCaptured) {
+    pushHistory();
+    dragState.historyCaptured = true;
+  }
+
+  if (dragState.type === "module") {
+    const moduleIndex = scenario.trackModules.findIndex((moduleRecord) => moduleRecord.id === dragState.id);
+    if (moduleIndex < 0) {
+      return;
+    }
+    removeConnectionsForModule(dragState.id);
+    const movePlan = getModuleMovePlan(scenario.trackModules[moduleIndex], positionValue);
+    scenario.trackModules[moduleIndex] = movePlan.moduleRecord;
+    if (movePlan.connection) {
+      scenario.connections.push({
+        fromModuleId: movePlan.connection.target.moduleId,
+        fromPortId: movePlan.connection.target.id,
+        toModuleId: dragState.id,
+        toPortId: movePlan.connection.sourcePortId,
+      });
+    }
+    rebuildScenario();
+    return;
+  }
+
+  if (dragState.type === "conflict") {
+    const conflictRecord = scenario.conflicts.find((itemRecord) => itemRecord.id === dragState.id);
+    if (!conflictRecord) {
+      return;
+    }
+    const nearestTrackPoint = getNearestTrackPoint(positionValue);
+    conflictRecord.position = nearestTrackPoint
+      ? [nearestTrackPoint.position.x, 0, nearestTrackPoint.position.z]
+      : [snapToGrid(positionValue.x), 0, snapToGrid(positionValue.z)];
+    rebuildScenario();
+  }
+}
+
 function updatePlacementPreview(positionValue) {
   currentPlacementPreview = getPlacementPlan(positionValue);
   clearGroup(previewGroup);
@@ -1323,6 +1582,47 @@ function removeConnectionsForModule(moduleId) {
   );
 }
 
+function renderValidationList(validationWarnings) {
+  if (!validationList) {
+    return;
+  }
+  if (validationWarnings.length === 0) {
+    const emptyItem = document.createElement("li");
+    const emptyButton = document.createElement("button");
+    emptyButton.type = "button";
+    emptyButton.textContent = "No validation issues";
+    emptyButton.disabled = true;
+    emptyItem.append(emptyButton);
+    validationList.replaceChildren(emptyItem);
+    return;
+  }
+
+  validationList.replaceChildren(
+    ...validationWarnings.slice(0, 9).map((warningRecord, warningIndex) => {
+      const listItem = document.createElement("li");
+      const buttonElement = document.createElement("button");
+      buttonElement.type = "button";
+      buttonElement.textContent = warningRecord.message;
+      buttonElement.className = warningRecord.type === "overlap" ? "is-danger" : "";
+      buttonElement.addEventListener("click", () => zoomToValidationIssue(warningRecord));
+      listItem.append(buttonElement);
+      listItem.dataset.issueIndex = String(warningIndex);
+      return listItem;
+    }),
+  );
+}
+
+function zoomToValidationIssue(warningRecord) {
+  if (warningRecord.objectType && warningRecord.objectId) {
+    setSelectedObject({ type: warningRecord.objectType, id: warningRecord.objectId });
+  }
+  const targetPosition = warningRecord.position.clone ? warningRecord.position : new THREE.Vector3(...warningRecord.position);
+  desiredCameraPosition.set(targetPosition.x + 13, 14, targetPosition.z + 13);
+  desiredCameraTarget.set(targetPosition.x, 0.8, targetPosition.z);
+  cameraPresetActive = true;
+  followingTrain = false;
+}
+
 function deleteSelected() {
   if (selectedConflictId) {
     pushHistory();
@@ -1338,7 +1638,7 @@ function deleteSelected() {
     scenario.trackModules = scenario.trackModules.filter((moduleRecord) => moduleRecord.id !== selectedModuleId);
     removeConnectionsForModule(selectedModuleId);
     scenario.conflicts.forEach((conflictRecord) => {
-      conflictRecord.affectedModuleIds = conflictRecord.affectedModuleIds.filter((moduleId) => moduleId !== selectedModuleId);
+      conflictRecord.affectedModuleIds = (conflictRecord.affectedModuleIds ?? []).filter((moduleId) => moduleId !== selectedModuleId);
     });
     selectedModuleId = null;
     rebuildScenario();
@@ -1350,7 +1650,7 @@ function deleteSelected() {
     pushHistory();
     scenario.trains = scenario.trains.filter((trainRecord) => trainRecord.id !== selectedTrainId);
     scenario.conflicts.forEach((conflictRecord) => {
-      conflictRecord.affectedTrainIds = conflictRecord.affectedTrainIds.filter((trainId) => trainId !== selectedTrainId);
+      conflictRecord.affectedTrainIds = (conflictRecord.affectedTrainIds ?? []).filter((trainId) => trainId !== selectedTrainId);
     });
     selectedTrainId = scenario.trains[0]?.id ?? null;
     rebuildScenario();
@@ -1532,6 +1832,8 @@ function validateScenario() {
           type: "disconnected-port",
           message: `${moduleRecord.name ?? moduleRecord.type} has open port ${portRecord.id}.`,
           position: portRecord.position,
+          objectType: "module",
+          objectId: moduleRecord.id,
         });
       }
     });
@@ -1546,6 +1848,8 @@ function validateScenario() {
           type: "overlap",
           message: `${moduleRecord.name ?? moduleRecord.type} overlaps ${otherModule.name ?? otherModule.type}.`,
           position: modulePosition.clone().lerp(otherPosition, 0.5),
+          objectType: "module",
+          objectId: moduleRecord.id,
         });
       }
     });
@@ -1557,6 +1861,31 @@ function validateScenario() {
         type: "route",
         message: `${trainRecord.displayName} has no complete connected route.`,
         position: new THREE.Vector3(0, 0.1, 0),
+        objectType: "train",
+        objectId: trainRecord.id,
+      });
+    }
+    if (!trainRecord.enabled) {
+      warnings.push({
+        type: "disabled-train",
+        message: `${trainRecord.displayName} is disabled.`,
+        position: new THREE.Vector3(0, 0.1, 0),
+        objectType: "train",
+        objectId: trainRecord.id,
+      });
+    }
+  });
+
+  scenario.conflicts.forEach((conflictRecord) => {
+    const affectedModuleIds = conflictRecord.affectedModuleIds ?? [];
+    const affectedTrainIds = conflictRecord.affectedTrainIds ?? [];
+    if (conflictRecord.active && affectedModuleIds.length === 0 && affectedTrainIds.length === 0) {
+      warnings.push({
+        type: "conflict-scope",
+        message: `${conflictRecord.label} has no affected objects.`,
+        position: new THREE.Vector3(conflictRecord.position[0], 0.1, conflictRecord.position[2]),
+        objectType: "conflict",
+        objectId: conflictRecord.id,
       });
     }
   });
@@ -1585,6 +1914,7 @@ function rebuildScenario() {
   clearGroup(trainGroup);
   clearGroup(labelGroup);
   clearGroup(overlayGroup);
+  createMapAnnotations();
 
   scenario.trackModules.forEach((moduleRecord) => {
     const moduleObject = createTrackModuleObject(moduleRecord);
@@ -1735,6 +2065,11 @@ function syncControls() {
   if (snapEnabledInput) {
     snapEnabledInput.checked = appState.snapEnabled;
   }
+  document.body.classList.toggle("is-presenting", appState.presentationMode);
+  if (presentationModeButton) {
+    presentationModeButton.textContent = appState.presentationMode ? "Exit presentation" : "Presentation mode";
+    presentationModeButton.classList.toggle("is-active", appState.presentationMode);
+  }
   syncHistoryControls();
   updateTrainNameInput();
 }
@@ -1780,6 +2115,73 @@ function wireInterface() {
     rebuildScenario();
   });
   resetDemoButton?.addEventListener("click", resetDemo);
+
+  presentationModeButton?.addEventListener("click", () => {
+    pushHistory();
+    appState.presentationMode = !appState.presentationMode;
+    scenario.view.presentationMode = appState.presentationMode;
+    syncControls();
+    scheduleUrlUpdate();
+  });
+
+  exportScreenshotButton?.addEventListener("click", () => {
+    renderer.render(scene, camera);
+    const screenshotLink = document.createElement("a");
+    screenshotLink.href = renderer.domElement.toDataURL("image/png");
+    screenshotLink.download = "rail-scenario-planner.png";
+    screenshotLink.click();
+  });
+
+  moduleNameInput?.addEventListener("change", () => {
+    const selectedModule = selectedModuleId ? getModuleById(selectedModuleId) : null;
+    if (!selectedModule) {
+      return;
+    }
+    pushHistory();
+    selectedModule.name = moduleNameInput.value.trim() || undefined;
+    rebuildScenario();
+    scheduleUrlUpdate();
+  });
+
+  moduleRotationInput?.addEventListener("input", () => {
+    const selectedModule = selectedModuleId ? getModuleById(selectedModuleId) : null;
+    if (!selectedModule) {
+      return;
+    }
+    selectedModule.rotation = (Number(moduleRotationInput.value) * Math.PI) / 180;
+    if (moduleRotationValue) {
+      moduleRotationValue.textContent = `${moduleRotationInput.value} deg`;
+    }
+    removeConnectionsForModule(selectedModule.id);
+    rebuildScenario();
+  });
+
+  moduleRotationInput?.addEventListener("pointerdown", pushHistory);
+  moduleRotationInput?.addEventListener("change", scheduleUrlUpdate);
+
+  reconnectModuleButton?.addEventListener("click", () => {
+    const selectedModule = selectedModuleId ? getModuleById(selectedModuleId) : null;
+    if (!selectedModule) {
+      return;
+    }
+    const openPort = getWorldPorts(selectedModule).find((portRecord) => !isPortConnected(selectedModule.id, portRecord.id));
+    if (!openPort) {
+      return;
+    }
+    const targetPort = findNearestOpenPort(openPort.position, selectedModule.id);
+    if (!targetPort) {
+      return;
+    }
+    pushHistory();
+    scenario.connections.push({
+      fromModuleId: targetPort.moduleId,
+      fromPortId: targetPort.id,
+      toModuleId: selectedModule.id,
+      toPortId: openPort.id,
+    });
+    rebuildScenario();
+    scheduleUrlUpdate();
+  });
 
   playPauseButton?.addEventListener("click", () => {
     appState.running = !appState.running;
@@ -1861,13 +2263,70 @@ function wireInterface() {
     scheduleUrlUpdate();
   });
 
+  trainColorInput?.addEventListener("change", () => {
+    const selectedTrain = scenario.trains.find((trainRecord) => trainRecord.id === selectedTrainId);
+    if (!selectedTrain) {
+      return;
+    }
+    pushHistory();
+    selectedTrain.color = trainColorInput.value;
+    rebuildScenario();
+    scheduleUrlUpdate();
+  });
+
+  conflictLabelInput?.addEventListener("change", () => {
+    const selectedConflict = scenario.conflicts.find((conflictRecord) => conflictRecord.id === selectedConflictId);
+    if (!selectedConflict) {
+      return;
+    }
+    pushHistory();
+    selectedConflict.label = conflictLabelInput.value.trim() || "Conflict";
+    rebuildScenario();
+    scheduleUrlUpdate();
+  });
+
+  conflictTypeSelect?.addEventListener("change", () => {
+    const selectedConflict = scenario.conflicts.find((conflictRecord) => conflictRecord.id === selectedConflictId);
+    if (!selectedConflict) {
+      return;
+    }
+    pushHistory();
+    selectedConflict.type = conflictTypeSelect.value;
+    rebuildScenario();
+    scheduleUrlUpdate();
+  });
+
+  conflictSeveritySelect?.addEventListener("change", () => {
+    const selectedConflict = scenario.conflicts.find((conflictRecord) => conflictRecord.id === selectedConflictId);
+    if (!selectedConflict) {
+      return;
+    }
+    pushHistory();
+    selectedConflict.severity = conflictSeveritySelect.value;
+    rebuildScenario();
+    scheduleUrlUpdate();
+  });
+
+  conflictActiveInput?.addEventListener("change", () => {
+    const selectedConflict = scenario.conflicts.find((conflictRecord) => conflictRecord.id === selectedConflictId);
+    if (!selectedConflict) {
+      return;
+    }
+    pushHistory();
+    selectedConflict.active = conflictActiveInput.checked;
+    rebuildScenario();
+    scheduleUrlUpdate();
+  });
+
   nextTrainButton?.addEventListener("click", () => {
     if (scenario.trains.length === 0) {
       return;
     }
     const currentIndex = Math.max(0, scenario.trains.findIndex((trainRecord) => trainRecord.id === selectedTrainId));
     selectedTrainId = scenario.trains[(currentIndex + 1) % scenario.trains.length].id;
-    updateSelectedTrain();
+    selectedModuleId = null;
+    selectedConflictId = null;
+    rebuildScenario();
   });
 
   [
@@ -1914,6 +2373,20 @@ function wireInterface() {
     if (event.ctrlKey || event.metaKey) {
       return;
     }
+    const pickedObject = getPickedObject(event);
+    if (pickedObject) {
+      setSelectedObject(pickedObject);
+      if (pickedObject.type === "module" || pickedObject.type === "conflict") {
+        dragState = {
+          type: pickedObject.type,
+          id: pickedObject.id,
+          historyCaptured: false,
+        };
+        orbitControls.enabled = false;
+        renderer.domElement.setPointerCapture(event.pointerId);
+      }
+      return;
+    }
     const groundPoint = pointerToGround(event);
     if (event.shiftKey) {
       selectNearestModule(groundPoint);
@@ -1924,7 +2397,25 @@ function wireInterface() {
 
   renderer.domElement.addEventListener("pointermove", (event) => {
     const groundPoint = pointerToGround(event);
+    if (dragState) {
+      moveSelectedObjectToGround(groundPoint);
+      return;
+    }
     updatePlacementPreview(groundPoint);
+  });
+
+  renderer.domElement.addEventListener("pointerup", (event) => {
+    if (!dragState) {
+      return;
+    }
+    dragState = null;
+    orbitControls.enabled = true;
+    try {
+      renderer.domElement.releasePointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture may already be released if the browser cancels the gesture.
+    }
+    scheduleUrlUpdate();
   });
 
   renderer.domElement.addEventListener("pointerleave", clearPlacementPreview);
@@ -1968,6 +2459,7 @@ function wireInterface() {
 function hydrateViewState() {
   appState.speed = scenario.view?.speed ?? appState.speed;
   appState.snapEnabled = scenario.view?.snapEnabled ?? appState.snapEnabled;
+  appState.presentationMode = scenario.view?.presentationMode ?? appState.presentationMode;
   appState.overlays = {
     ...appState.overlays,
     ...(scenario.view?.overlays ?? {}),
