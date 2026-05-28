@@ -1,3 +1,7 @@
 .DS_Store
 qa-*.png
 current-study-*.png
+rail-scenario-*.png
+rail-scenario-*.webm
+exports/
+recordings/

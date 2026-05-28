@@ -5,11 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
     <title>Rail Scenario Planner</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./src/styles/app.css" />
   </head>
   <body>
     <div class="app-shell">
       <canvas class="scene-canvas" aria-label="3D rail scenario planning canvas"></canvas>
+      <div id="title-overlay" class="title-overlay" hidden>
+        <p id="overlay-author" class="overlay-author">Stakeholder Operations Demo</p>
+        <h1 id="overlay-title">Rail Scenario Planner</h1>
+        <p id="overlay-subtitle">Explain railway planning, operations, and conflicts</p>
+      </div>
 
       <aside class="side-panel" aria-label="Rail scenario controls">
         <header class="panel-header">
@@ -44,6 +49,44 @@
               <strong id="kpi-warnings">0</strong>
             </div>
           </div>
+        </section>
+
+        <section class="panel-section edit-only">
+          <h2>Project</h2>
+          <label class="field-label" for="project-title">Title</label>
+          <input id="project-title" class="text-input" type="text" maxlength="52" />
+          <label class="field-label field-label--spaced" for="project-subtitle">Subtitle</label>
+          <input id="project-subtitle" class="text-input" type="text" maxlength="86" />
+          <label class="field-label field-label--spaced" for="project-author">Author / client</label>
+          <input id="project-author" class="text-input" type="text" maxlength="54" />
+          <label class="field-label field-label--spaced" for="project-notes">Notes</label>
+          <textarea id="project-notes" class="text-input text-area" maxlength="220"></textarea>
+          <label class="field-label field-label--spaced" for="theme-preset">Theme</label>
+          <select id="theme-preset" class="text-input">
+            <option value="professional">Professional Blue</option>
+            <option value="safety">Safety Amber</option>
+            <option value="night">Night Operations</option>
+            <option value="neutral">Neutral Report</option>
+          </select>
+          <div class="color-grid">
+            <label>
+              <span>Accent</span>
+              <input id="theme-accent" type="color" value="#2563eb" />
+            </label>
+            <label>
+              <span>Path</span>
+              <input id="theme-path" type="color" value="#0f766e" />
+            </label>
+            <label>
+              <span>Conflict</span>
+              <input id="theme-conflict" type="color" value="#dc2626" />
+            </label>
+            <label>
+              <span>Labels</span>
+              <input id="theme-label" type="color" value="#111827" />
+            </label>
+          </div>
+          <button id="apply-project" class="button-wide button-secondary" type="button">Apply to scene</button>
         </section>
 
         <section class="panel-section edit-only">
@@ -224,7 +267,48 @@
         <section class="panel-section panel-section--readout">
           <h2>Scenario Readout</h2>
           <ul id="scenario-readout" class="readout-list"></ul>
+        </section>
+
+        <section class="panel-section">
+          <h2>Save &amp; Share</h2>
+          <div class="save-status">
+            <span>Browser save</span>
+            <strong id="save-status">Saved</strong>
+          </div>
+          <div class="compact-row">
+            <button id="save-now" type="button">Save now</button>
+            <button id="clear-browser-save" type="button">Clear save</button>
+          </div>
+          <div class="compact-row">
+            <button id="export-json" type="button">Export JSON</button>
+            <button id="import-json" type="button">Import JSON</button>
+          </div>
+          <input id="import-json-file" type="file" accept="application/json,.json" hidden />
           <button id="share-scenario" class="button-wide" type="button">Copy share URL</button>
+        </section>
+
+        <section class="panel-section">
+          <h2>Export Playback</h2>
+          <label class="slider-row" for="playback-duration">
+            <span>Duration</span>
+            <strong id="playback-duration-value">10s</strong>
+          </label>
+          <input id="playback-duration" type="range" min="4" max="30" step="1" value="10" />
+          <label class="slider-row slider-row--spaced" for="playback-fps">
+            <span>FPS</span>
+            <strong id="playback-fps-value">30</strong>
+          </label>
+          <input id="playback-fps" type="range" min="12" max="60" step="6" value="30" />
+          <label class="slider-row slider-row--spaced" for="playback-speed">
+            <span>Export speed</span>
+            <strong id="playback-speed-value">1.00x</strong>
+          </label>
+          <input id="playback-speed" type="range" min="0.25" max="3" step="0.25" value="1" />
+          <label class="check-row">
+            <input id="playback-reset" type="checkbox" checked />
+            <span>Start export from time zero</span>
+          </label>
+          <button id="export-playback" class="button-wide" type="button">Export WEBM</button>
         </section>
       </aside>
     </div>
@@ -237,6 +321,6 @@
         }
       }
     </script>
-    <script type="module" src="./main.js"></script>
+    <script type="module" src="./src/main.js"></script>
   </body>
 </html>

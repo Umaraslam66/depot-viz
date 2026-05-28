@@ -1,59 +1,109 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { defaultScenario, browserSaveKey, scenarioVersion } from "./config/scenario.js";
+import { themePresets } from "./config/themePresets.js";
+import {
+  encodeScenarioSnapshot,
+  normalizeScenario as normalizeScenarioState,
+  readScenarioFromBrowser,
+  readScenarioFromUrl,
+} from "./state/scenarioStore.js";
+import { downloadBlob, safeFilename } from "./export/downloads.js";
+import { createCameraPresets } from "./scene/cameraPresets.js";
+import { colors, createMaterials } from "./scene/materials.js";
+import {
+  getModulePortDefinitions,
+  getWorldPorts,
+  moduleHasPorts,
+  normalizeRotation,
+  worldPosition,
+} from "./scene/trackGeometry.js";
+import { cloneJson } from "./utils/serialization.js";
+import { getDomRefs } from "./ui/dom.js";
 
-const sceneCanvas = document.querySelector(".scene-canvas");
-const runStatus = document.querySelector("#run-status");
-const toolButtons = [...document.querySelectorAll("[data-tool]")];
-const presetButtons = [...document.querySelectorAll("[data-preset]")];
-const rotateToolButton = document.querySelector("#rotate-tool");
-const clearSelectionButton = document.querySelector("#clear-selection");
-const snapEnabledInput = document.querySelector("#snap-enabled");
-const deleteSelectedButton = document.querySelector("#delete-selected");
-const duplicateSelectedButton = document.querySelector("#duplicate-selected");
-const undoButton = document.querySelector("#undo-action");
-const redoButton = document.querySelector("#redo-action");
-const rebuildRoutesButton = document.querySelector("#rebuild-routes");
-const resetDemoButton = document.querySelector("#reset-demo");
-const playPauseButton = document.querySelector("#play-pause");
-const resetTimeButton = document.querySelector("#reset-time");
-const followTrainButton = document.querySelector("#follow-train");
-const speedInput = document.querySelector("#scenario-speed");
-const speedValue = document.querySelector("#scenario-speed-value");
-const trainNameInput = document.querySelector("#train-name");
-const trainRouteSelect = document.querySelector("#train-route");
-const selectedTrainSpeedInput = document.querySelector("#train-speed");
-const selectedTrainSpeedValue = document.querySelector("#train-speed-value");
-const trainEnabledInput = document.querySelector("#train-enabled");
-const renameTrainButton = document.querySelector("#rename-train");
-const nextTrainButton = document.querySelector("#next-train");
-const labelsToggle = document.querySelector("#overlay-labels");
-const conflictsToggle = document.querySelector("#overlay-conflicts");
-const blocksToggle = document.querySelector("#overlay-blocks");
-const pathsToggle = document.querySelector("#overlay-paths");
-const connectionsToggle = document.querySelector("#overlay-connections");
-const validationToggle = document.querySelector("#overlay-validation");
-const readoutList = document.querySelector("#scenario-readout");
-const shareButton = document.querySelector("#share-scenario");
-const presentationModeButton = document.querySelector("#presentation-mode");
-const exportScreenshotButton = document.querySelector("#export-screenshot");
-const kpiTrains = document.querySelector("#kpi-trains");
-const kpiConflicts = document.querySelector("#kpi-conflicts");
-const kpiWarnings = document.querySelector("#kpi-warnings");
-const propertiesEmpty = document.querySelector("#properties-empty");
-const moduleProperties = document.querySelector("#module-properties");
-const trainProperties = document.querySelector("#train-properties");
-const conflictProperties = document.querySelector("#conflict-properties");
-const moduleNameInput = document.querySelector("#module-name");
-const moduleTypeReadout = document.querySelector("#module-type");
-const moduleRotationInput = document.querySelector("#module-rotation");
-const moduleRotationValue = document.querySelector("#module-rotation-value");
-const reconnectModuleButton = document.querySelector("#reconnect-module");
-const trainColorInput = document.querySelector("#train-color");
-const conflictLabelInput = document.querySelector("#conflict-label");
-const conflictTypeSelect = document.querySelector("#conflict-type");
-const conflictSeveritySelect = document.querySelector("#conflict-severity");
-const conflictActiveInput = document.querySelector("#conflict-active");
-const validationList = document.querySelector("#validation-list");
+const {
+  sceneCanvas,
+  runStatus,
+  toolButtons,
+  presetButtons,
+  rotateToolButton,
+  clearSelectionButton,
+  snapEnabledInput,
+  deleteSelectedButton,
+  duplicateSelectedButton,
+  undoButton,
+  redoButton,
+  rebuildRoutesButton,
+  resetDemoButton,
+  playPauseButton,
+  resetTimeButton,
+  followTrainButton,
+  speedInput,
+  speedValue,
+  trainNameInput,
+  trainRouteSelect,
+  selectedTrainSpeedInput,
+  selectedTrainSpeedValue,
+  trainEnabledInput,
+  renameTrainButton,
+  nextTrainButton,
+  labelsToggle,
+  conflictsToggle,
+  blocksToggle,
+  pathsToggle,
+  connectionsToggle,
+  validationToggle,
+  readoutList,
+  shareButton,
+  presentationModeButton,
+  exportScreenshotButton,
+  kpiTrains,
+  kpiConflicts,
+  kpiWarnings,
+  propertiesEmpty,
+  moduleProperties,
+  trainProperties,
+  conflictProperties,
+  moduleNameInput,
+  moduleTypeReadout,
+  moduleRotationInput,
+  moduleRotationValue,
+  reconnectModuleButton,
+  trainColorInput,
+  conflictLabelInput,
+  conflictTypeSelect,
+  conflictSeveritySelect,
+  conflictActiveInput,
+  validationList,
+  titleOverlay,
+  overlayAuthor,
+  overlayTitle,
+  overlaySubtitle,
+  projectTitleInput,
+  projectSubtitleInput,
+  projectAuthorInput,
+  projectNotesInput,
+  themePresetSelect,
+  themeAccentInput,
+  themePathInput,
+  themeConflictInput,
+  themeLabelInput,
+  applyProjectButton,
+  saveStatus,
+  saveNowButton,
+  clearBrowserSaveButton,
+  exportJsonButton,
+  importJsonButton,
+  importJsonFile,
+  playbackDurationInput,
+  playbackDurationValue,
+  playbackFpsInput,
+  playbackFpsValue,
+  playbackSpeedInput,
+  playbackSpeedValue,
+  playbackResetInput,
+  exportPlaybackButton,
+} = getDomRefs();
 
 let renderer;
 try {
@@ -86,6 +136,7 @@ const camera = new THREE.PerspectiveCamera(
   260,
 );
 camera.position.set(38, 38, 42);
+scene.add(camera);
 
 const orbitControls = new OrbitControls(camera, renderer.domElement);
 orbitControls.enableDamping = true;
@@ -107,99 +158,7 @@ const fillLight = new THREE.DirectionalLight(0xd8e9ff, 0.8);
 fillLight.position.set(-26, 24, -22);
 scene.add(fillLight);
 
-const colors = {
-  ground: 0xf4f7fa,
-  grid: 0xc7d2de,
-  rail: 0x334155,
-  sleeper: 0x8b9aaa,
-  ballast: 0xd6dee8,
-  platform: 0xcbd5e1,
-  platformEdge: 0xf59e0b,
-  station: 0x1f4b76,
-  signalRed: 0xdc2626,
-  signalGreen: 0x059669,
-  signalMast: 0x475569,
-  occupied: 0x2563eb,
-  path: 0x0f766e,
-  conflictLow: 0xf59e0b,
-  conflictHigh: 0xdc2626,
-  selection: 0x38bdf8,
-  connection: 0x10b981,
-  validation: 0xef4444,
-  snapGrid: 0xf59e0b,
-};
-
-const materials = {
-  ground: new THREE.MeshStandardMaterial({ color: colors.ground, roughness: 0.86, metalness: 0.01 }),
-  grid: new THREE.LineBasicMaterial({ color: colors.grid, transparent: true, opacity: 0.72 }),
-  rail: new THREE.MeshStandardMaterial({ color: colors.rail, roughness: 0.36, metalness: 0.28 }),
-  sleeper: new THREE.MeshStandardMaterial({ color: colors.sleeper, roughness: 0.76, metalness: 0.02 }),
-  ballast: new THREE.MeshStandardMaterial({ color: colors.ballast, roughness: 0.88, metalness: 0 }),
-  platform: new THREE.MeshStandardMaterial({ color: colors.platform, roughness: 0.82, metalness: 0.02 }),
-  platformEdge: new THREE.MeshStandardMaterial({ color: colors.platformEdge, roughness: 0.54, metalness: 0.02 }),
-  station: new THREE.MeshStandardMaterial({ color: colors.station, roughness: 0.58, metalness: 0.05 }),
-  signalMast: new THREE.MeshStandardMaterial({ color: colors.signalMast, roughness: 0.46, metalness: 0.18 }),
-  signalRed: new THREE.MeshStandardMaterial({
-    color: colors.signalRed,
-    emissive: colors.signalRed,
-    emissiveIntensity: 0.5,
-    roughness: 0.34,
-  }),
-  signalGreen: new THREE.MeshStandardMaterial({
-    color: colors.signalGreen,
-    emissive: colors.signalGreen,
-    emissiveIntensity: 0.42,
-    roughness: 0.34,
-  }),
-  occupied: new THREE.MeshBasicMaterial({
-    color: colors.occupied,
-    transparent: true,
-    opacity: 0.2,
-    depthWrite: false,
-    side: THREE.DoubleSide,
-  }),
-  path: new THREE.LineBasicMaterial({ color: colors.path, transparent: true, opacity: 0.7 }),
-  selection: new THREE.MeshBasicMaterial({
-    color: colors.selection,
-    transparent: true,
-    opacity: 0.28,
-    depthWrite: false,
-    side: THREE.DoubleSide,
-  }),
-  connection: new THREE.MeshBasicMaterial({
-    color: colors.connection,
-    transparent: true,
-    opacity: 0.82,
-    depthWrite: false,
-  }),
-  validation: new THREE.MeshBasicMaterial({
-    color: colors.validation,
-    transparent: true,
-    opacity: 0.78,
-    depthWrite: false,
-  }),
-  previewValid: new THREE.MeshBasicMaterial({
-    color: colors.connection,
-    transparent: true,
-    opacity: 0.32,
-    depthWrite: false,
-    side: THREE.DoubleSide,
-  }),
-  previewGrid: new THREE.MeshBasicMaterial({
-    color: colors.snapGrid,
-    transparent: true,
-    opacity: 0.28,
-    depthWrite: false,
-    side: THREE.DoubleSide,
-  }),
-  previewBlocked: new THREE.MeshBasicMaterial({
-    color: colors.validation,
-    transparent: true,
-    opacity: 0.3,
-    depthWrite: false,
-    side: THREE.DoubleSide,
-  }),
-};
+const materials = createMaterials(THREE);
 
 const scenarioGroup = new THREE.Group();
 const labelGroup = new THREE.Group();
@@ -212,7 +171,6 @@ const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const gridSize = 4;
-const scenarioVersion = 1;
 const moduleObjects = new Map();
 const trainObjects = new Map();
 const labelObjects = new Map();
@@ -234,8 +192,12 @@ let activeTool = "straight";
 let toolRotation = 0;
 let followingTrain = false;
 let urlUpdateTimer = 0;
+let autosaveTimer = 0;
+let restoredFromBrowser = false;
+let recordingPlayback = false;
 let currentPlacementPreview = null;
 let dragState = null;
+let titleCardSprite = null;
 const undoStack = [];
 const redoStack = [];
 const maxHistoryEntries = 40;
@@ -248,6 +210,7 @@ const appState = {
   speed: Number(speedInput?.value ?? 1),
   snapEnabled: true,
   presentationMode: false,
+  saveState: "saved",
   overlays: {
     labels: true,
     conflicts: true,
@@ -258,175 +221,63 @@ const appState = {
   },
 };
 
-const defaultScenario = {
-  version: scenarioVersion,
-  nextId: 20,
-  trackModules: [
-    { id: "m1", type: "station", position: [-18, 0, -4], rotation: 0, name: "Central" },
-    { id: "m2", type: "straight", position: [-10, 0, -4], rotation: 0 },
-    { id: "m3", type: "turnout", position: [-2, 0, -4], rotation: 0, name: "J1" },
-    { id: "m4", type: "straight", position: [6, 0, -4], rotation: 0 },
-    { id: "m5", type: "station", position: [15, 0, -4], rotation: 0, name: "East Park" },
-    { id: "m6", type: "curve", position: [22, 0, 2], rotation: Math.PI * 0.5 },
-    { id: "m7", type: "straight", position: [15, 0, 10], rotation: Math.PI },
-    { id: "m8", type: "station", position: [5, 0, 10], rotation: Math.PI, name: "Airport Branch" },
-    { id: "m9", type: "curve", position: [-6, 0, 6], rotation: Math.PI },
-    { id: "m10", type: "straight", position: [-16, 0, 10], rotation: Math.PI },
-    { id: "m11", type: "curve", position: [-24, 0, 2], rotation: Math.PI * 1.5 },
-    { id: "m12", type: "signal", position: [-6, 0, -7], rotation: 0, name: "S12" },
-    { id: "m13", type: "signal", position: [9, 0, -7], rotation: 0, name: "S18" },
-  ],
-  connections: [
-    { fromModuleId: "m1", fromPortId: "B", toModuleId: "m2", toPortId: "A" },
-    { fromModuleId: "m2", fromPortId: "B", toModuleId: "m3", toPortId: "A" },
-    { fromModuleId: "m3", fromPortId: "B", toModuleId: "m4", toPortId: "A" },
-    { fromModuleId: "m4", fromPortId: "B", toModuleId: "m5", toPortId: "A" },
-    { fromModuleId: "m5", fromPortId: "B", toModuleId: "m6", toPortId: "A" },
-    { fromModuleId: "m6", fromPortId: "B", toModuleId: "m7", toPortId: "A" },
-    { fromModuleId: "m7", fromPortId: "B", toModuleId: "m8", toPortId: "A" },
-    { fromModuleId: "m9", fromPortId: "B", toModuleId: "m10", toPortId: "A" },
-    { fromModuleId: "m10", fromPortId: "B", toModuleId: "m11", toPortId: "A" },
-  ],
-  trains: [
-    {
-      id: "t1",
-      displayName: "IC-214",
-      color: "#2563eb",
-      route: "main",
-      selectedRouteId: "main",
-      speed: 7.2,
-      startOffset: 0,
-      enabled: true,
-    },
-    {
-      id: "t2",
-      displayName: "RE-08",
-      color: "#059669",
-      route: "main",
-      selectedRouteId: "main",
-      speed: 6.1,
-      startOffset: 0.34,
-      enabled: true,
-    },
-    {
-      id: "t3",
-      displayName: "FR-772",
-      color: "#9333ea",
-      route: "branch",
-      selectedRouteId: "branch",
-      speed: 5.2,
-      startOffset: 0.18,
-      enabled: true,
-    },
-  ],
-  conflicts: [
-    {
-      id: "c1",
-      type: "junction",
-      severity: "high",
-      position: [-2, 0, -4],
-      affectedModuleIds: ["m3"],
-      affectedTrainIds: ["t1", "t2"],
-      label: "Junction J1 crossing move",
-      active: true,
-    },
-    {
-      id: "c2",
-      type: "platform",
-      severity: "medium",
-      position: [15, 0, -4],
-      affectedModuleIds: ["m5"],
-      affectedTrainIds: ["t2"],
-      label: "Platform 2 occupied",
-      active: true,
-    },
-    {
-      id: "c3",
-      type: "blocked",
-      severity: "high",
-      position: [6, 0, -4],
-      affectedModuleIds: ["m4"],
-      affectedTrainIds: ["t1"],
-      label: "Maintenance possession on block B4",
-      active: true,
-    },
-  ],
-  view: {
-    preset: "overview",
-    speed: 1,
-    snapEnabled: true,
-    presentationMode: false,
-    overlays: {
-      labels: true,
-      conflicts: true,
-      blocks: true,
-      paths: true,
-      connections: true,
-      validation: true,
-    },
-  },
-};
-
-let scenario = loadScenarioFromUrl() ?? structuredClone(defaultScenario);
+const urlScenario = readScenarioFromUrl(window, defaultScenario);
+const browserScenario = urlScenario ? null : readScenarioFromBrowser(window, browserSaveKey, defaultScenario);
+restoredFromBrowser = Boolean(browserScenario);
+let scenario = normalizeScenario(urlScenario ?? browserScenario ?? cloneJson(defaultScenario));
 selectedTrainId = scenario.trains.find((trainRecord) => trainRecord.enabled)?.id ?? scenario.trains[0]?.id ?? null;
 
-const cameraPresets = {
-  overview: {
-    position: new THREE.Vector3(36, 38, 42),
-    target: new THREE.Vector3(0, 0, 0),
-  },
-  station: {
-    position: new THREE.Vector3(7, 17, 24),
-    target: new THREE.Vector3(15, 1, -4),
-  },
-  junction: {
-    position: new THREE.Vector3(-14, 18, 18),
-    target: new THREE.Vector3(-2, 1, -4),
-  },
-  blocks: {
-    position: new THREE.Vector3(2, 30, 18),
-    target: new THREE.Vector3(2, 0, 1),
-  },
-};
+const cameraPresets = createCameraPresets(THREE);
 
-function structuredClone(value) {
-  return JSON.parse(JSON.stringify(value));
-}
-
-function loadScenarioFromUrl() {
-  const urlParams = new URLSearchParams(window.location.search);
-  const encodedScenario = urlParams.get("scenario");
-  if (!encodedScenario) {
-    return null;
-  }
-
-  try {
-    const decodedJson = decodeURIComponent(escape(atob(encodedScenario)));
-    const parsedScenario = JSON.parse(decodedJson);
-    if (!Array.isArray(parsedScenario.trackModules) || !Array.isArray(parsedScenario.trains)) {
-      return null;
-    }
-    return {
-      ...structuredClone(defaultScenario),
-      ...parsedScenario,
-      view: {
-        ...defaultScenario.view,
-        ...(parsedScenario.view ?? {}),
-        overlays: {
-          ...defaultScenario.view.overlays,
-          ...(parsedScenario.view?.overlays ?? {}),
-        },
-      },
-    };
-  } catch {
-    return null;
-  }
+function normalizeScenario(inputScenario) {
+  return normalizeScenarioState(inputScenario, defaultScenario);
 }
 
 function encodeScenario() {
-  const shareScenario = {
+  return encodeScenarioSnapshot(buildSerializableScenario());
+}
+
+function scheduleUrlUpdate() {
+  urlUpdateTimer = 0.8;
+  scheduleAutosave();
+}
+
+function commitScenarioToUrl() {
+  const nextUrl = new URL(window.location.href);
+  nextUrl.searchParams.set("scenario", encodeScenario());
+  window.history.replaceState(null, "", nextUrl);
+}
+
+function scheduleAutosave() {
+  autosaveTimer = 0.7;
+  setSaveState("unsaved", "Unsaved");
+}
+
+function saveScenarioToBrowser(statusText = "Saved") {
+  try {
+    window.localStorage.setItem(browserSaveKey, JSON.stringify(buildSerializableScenario()));
+    setSaveState("saved", statusText);
+  } catch {
+    setSaveState("error", "Save failed");
+  }
+}
+
+function clearBrowserSave() {
+  try {
+    autosaveTimer = 0;
+    window.localStorage.removeItem(browserSaveKey);
+    setSaveState("saved", "Cleared");
+  } catch {
+    setSaveState("error", "Clear failed");
+  }
+}
+
+function buildSerializableScenario() {
+  return {
     version: scenarioVersion,
     nextId: scenario.nextId,
+    meta: scenario.meta,
+    exports: scenario.exports,
     trackModules: scenario.trackModules,
     connections: scenario.connections,
     trains: scenario.trains,
@@ -439,23 +290,22 @@ function encodeScenario() {
       overlays: appState.overlays,
     },
   };
-  const jsonValue = JSON.stringify(shareScenario);
-  return btoa(unescape(encodeURIComponent(jsonValue)));
 }
 
-function scheduleUrlUpdate() {
-  urlUpdateTimer = 0.8;
-}
-
-function commitScenarioToUrl() {
-  const nextUrl = new URL(window.location.href);
-  nextUrl.searchParams.set("scenario", encodeScenario());
-  window.history.replaceState(null, "", nextUrl);
+function setSaveState(stateName, labelText) {
+  appState.saveState = stateName;
+  if (!saveStatus) {
+    return;
+  }
+  saveStatus.textContent = labelText;
+  saveStatus.classList.toggle("is-unsaved", stateName === "unsaved");
+  saveStatus.classList.toggle("is-recording", stateName === "recording");
+  saveStatus.classList.toggle("is-error", stateName === "error");
 }
 
 function captureEditorState() {
   return {
-    scenario: structuredClone(scenario),
+    scenario: cloneJson(scenario),
     selectedTrainId,
     selectedModuleId,
     selectedConflictId,
@@ -473,7 +323,7 @@ function captureEditorState() {
 }
 
 function restoreEditorState(editorState) {
-  scenario = structuredClone(editorState.scenario);
+  scenario = cloneJson(editorState.scenario);
   selectedTrainId = editorState.selectedTrainId;
   selectedModuleId = editorState.selectedModuleId;
   selectedConflictId = editorState.selectedConflictId;
@@ -577,6 +427,199 @@ function createMapAnnotations() {
   createLabelSprite("SECTION B", new THREE.Vector3(18, 1.1, 18), { scaleX: 3.0, scaleY: 0.7, fontSize: 34 });
 }
 
+function syncProjectControls() {
+  if (projectTitleInput) projectTitleInput.value = scenario.meta.title;
+  if (projectSubtitleInput) projectSubtitleInput.value = scenario.meta.subtitle;
+  if (projectAuthorInput) projectAuthorInput.value = scenario.meta.author;
+  if (projectNotesInput) projectNotesInput.value = scenario.meta.notes;
+  if (themePresetSelect) themePresetSelect.value = scenario.meta.theme;
+  if (themeAccentInput) themeAccentInput.value = scenario.meta.colors.accent;
+  if (themePathInput) themePathInput.value = scenario.meta.colors.path;
+  if (themeConflictInput) themeConflictInput.value = scenario.meta.colors.conflict;
+  if (themeLabelInput) themeLabelInput.value = scenario.meta.colors.label;
+  if (playbackDurationInput) playbackDurationInput.value = String(scenario.exports.playbackDuration);
+  if (playbackDurationValue) playbackDurationValue.textContent = `${scenario.exports.playbackDuration}s`;
+  if (playbackFpsInput) playbackFpsInput.value = String(scenario.exports.playbackFps);
+  if (playbackFpsValue) playbackFpsValue.textContent = String(scenario.exports.playbackFps);
+  if (playbackSpeedInput) playbackSpeedInput.value = String(scenario.exports.playbackSpeed);
+  if (playbackSpeedValue) playbackSpeedValue.textContent = `${scenario.exports.playbackSpeed.toFixed(2)}x`;
+  if (playbackResetInput) playbackResetInput.checked = scenario.exports.resetOnExport;
+}
+
+function applyProjectMetadataFromControls() {
+  scenario.meta.title = projectTitleInput?.value.trim() || defaultScenario.meta.title;
+  scenario.meta.subtitle = projectSubtitleInput?.value.trim() || defaultScenario.meta.subtitle;
+  scenario.meta.author = projectAuthorInput?.value.trim() || defaultScenario.meta.author;
+  scenario.meta.notes = projectNotesInput?.value.trim() || "";
+  scenario.meta.theme = themePresetSelect?.value ?? "professional";
+  scenario.meta.colors.accent = themeAccentInput?.value ?? scenario.meta.colors.accent;
+  scenario.meta.colors.path = themePathInput?.value ?? scenario.meta.colors.path;
+  scenario.meta.colors.conflict = themeConflictInput?.value ?? scenario.meta.colors.conflict;
+  scenario.meta.colors.label = themeLabelInput?.value ?? scenario.meta.colors.label;
+}
+
+function applyThemePreset(presetName) {
+  const presetValue = themePresets[presetName] ?? themePresets.professional;
+  scenario.meta.theme = presetName;
+  scenario.meta.colors = { ...scenario.meta.colors, ...presetValue };
+  syncProjectControls();
+  applySceneTheme();
+  rebuildScenario();
+}
+
+function applySceneTheme() {
+  const colorConfig = scenario.meta.colors;
+  document.documentElement.style.setProperty("--accent", colorConfig.accent);
+  document.documentElement.style.setProperty("--accent-dark", colorConfig.accent);
+  materials.path.color.set(colorConfig.path);
+  materials.signalRed.color.set(colorConfig.conflict);
+  materials.signalRed.emissive.set(colorConfig.conflict);
+  if (titleOverlay) {
+    titleOverlay.style.borderLeftColor = colorConfig.accent;
+  }
+  if (overlayAuthor) overlayAuthor.textContent = scenario.meta.author;
+  if (overlayTitle) overlayTitle.textContent = scenario.meta.title;
+  if (overlaySubtitle) overlaySubtitle.textContent = scenario.meta.subtitle;
+  document.title = scenario.meta.title;
+  refreshTitleCard();
+}
+
+function updateExportSettingsFromControls() {
+  scenario.exports.playbackDuration = Number(playbackDurationInput?.value ?? scenario.exports.playbackDuration);
+  scenario.exports.playbackFps = Number(playbackFpsInput?.value ?? scenario.exports.playbackFps);
+  scenario.exports.playbackSpeed = Number(playbackSpeedInput?.value ?? scenario.exports.playbackSpeed);
+  scenario.exports.resetOnExport = Boolean(playbackResetInput?.checked);
+  syncProjectControls();
+}
+
+function exportScenarioJson() {
+  const jsonBlob = new Blob([JSON.stringify(buildSerializableScenario(), null, 2)], {
+    type: "application/json",
+  });
+  downloadBlob(jsonBlob, safeFilename(scenario.meta.title, "json"));
+}
+
+function importScenarioJson(fileValue) {
+  const fileReader = new FileReader();
+  fileReader.addEventListener("load", () => {
+    try {
+      const parsedScenario = JSON.parse(String(fileReader.result));
+      if (!Array.isArray(parsedScenario.trackModules) || !Array.isArray(parsedScenario.trains)) {
+        throw new Error("Invalid scenario file");
+      }
+      pushHistory();
+      scenario = normalizeScenario(parsedScenario);
+      selectedTrainId = scenario.trains.find((trainRecord) => trainRecord.enabled)?.id ?? scenario.trains[0]?.id ?? null;
+      selectedModuleId = null;
+      selectedConflictId = null;
+      appState.time = 0;
+      hydrateViewState();
+      rebuildScenario();
+      setCameraPreset(scenario.view?.preset ?? "overview");
+      saveScenarioToBrowser("Imported");
+      scheduleUrlUpdate();
+    } catch {
+      setSaveState("error", "Import failed");
+    }
+  });
+  fileReader.readAsText(fileValue);
+}
+
+function exportScreenshotPng() {
+  const previousPresentationMode = appState.presentationMode;
+  appState.presentationMode = true;
+  syncControls();
+  renderer.render(scene, camera);
+  const screenshotLink = document.createElement("a");
+  screenshotLink.href = renderer.domElement.toDataURL("image/png");
+  screenshotLink.download = safeFilename(scenario.meta.title, "png");
+  screenshotLink.click();
+  appState.presentationMode = previousPresentationMode;
+  syncControls();
+}
+
+async function exportPlaybackWebm() {
+  if (recordingPlayback) {
+    return;
+  }
+  if (!renderer.domElement.captureStream || typeof MediaRecorder === "undefined") {
+    setSaveState("error", "WEBM unsupported");
+    exportScreenshotPng();
+    return;
+  }
+
+  updateExportSettingsFromControls();
+  const previousState = {
+    time: appState.time,
+    speed: appState.speed,
+    running: appState.running,
+    presentationMode: appState.presentationMode,
+  };
+  recordingPlayback = true;
+  setSaveState("recording", "Recording");
+  if (exportPlaybackButton) {
+    exportPlaybackButton.disabled = true;
+    exportPlaybackButton.textContent = "Recording...";
+  }
+
+  if (scenario.exports.resetOnExport) {
+    appState.time = 0;
+  }
+  appState.speed = scenario.exports.playbackSpeed;
+  appState.running = true;
+  appState.presentationMode = true;
+  syncControls();
+
+  const mediaStream = renderer.domElement.captureStream(scenario.exports.playbackFps);
+  const recorderOptions = MediaRecorder.isTypeSupported?.("video/webm") ? { mimeType: "video/webm" } : undefined;
+  let mediaRecorder;
+  try {
+    mediaRecorder = new MediaRecorder(mediaStream, recorderOptions);
+  } catch {
+    mediaStream.getTracks().forEach((track) => track.stop());
+    recordingPlayback = false;
+    appState.time = previousState.time;
+    appState.speed = previousState.speed;
+    appState.running = previousState.running;
+    appState.presentationMode = previousState.presentationMode;
+    if (exportPlaybackButton) {
+      exportPlaybackButton.disabled = false;
+      exportPlaybackButton.textContent = "Export WEBM";
+    }
+    syncControls();
+    setSaveState("error", "WEBM unsupported");
+    exportScreenshotPng();
+    return;
+  }
+  const recordedChunks = [];
+  mediaRecorder.addEventListener("dataavailable", (event) => {
+    if (event.data.size > 0) {
+      recordedChunks.push(event.data);
+    }
+  });
+
+  await new Promise((resolve) => {
+    mediaRecorder.addEventListener("stop", resolve, { once: true });
+    mediaRecorder.start();
+    window.setTimeout(() => mediaRecorder.stop(), scenario.exports.playbackDuration * 1000);
+  });
+
+  mediaStream.getTracks().forEach((track) => track.stop());
+  downloadBlob(new Blob(recordedChunks, { type: "video/webm" }), safeFilename(scenario.meta.title, "webm"));
+
+  appState.time = previousState.time;
+  appState.speed = previousState.speed;
+  appState.running = previousState.running;
+  appState.presentationMode = previousState.presentationMode;
+  recordingPlayback = false;
+  if (exportPlaybackButton) {
+    exportPlaybackButton.disabled = false;
+    exportPlaybackButton.textContent = "Export WEBM";
+  }
+  syncControls();
+  setSaveState("saved", "Saved");
+}
+
 function createTextTexture(textValue, options = {}) {
   const canvas = document.createElement("canvas");
   const width = options.width ?? 512;
@@ -585,7 +628,7 @@ function createTextTexture(textValue, options = {}) {
   canvas.height = height;
   const context = canvas.getContext("2d");
   const bg = options.background ?? "rgba(255, 255, 255, 0.94)";
-  const fg = options.color ?? "#111827";
+  const fg = options.color ?? scenario.meta?.colors?.label ?? "#111827";
   context.clearRect(0, 0, width, height);
   context.fillStyle = bg;
   roundRect(context, 8, 8, width - 16, height - 16, 18);
@@ -625,6 +668,53 @@ function createLabelSprite(textValue, positionValue, options = {}) {
   sprite.scale.set(options.scaleX ?? 5.2, options.scaleY ?? 1.28, 1);
   labelGroup.add(sprite);
   return sprite;
+}
+
+function createTitleCardTexture() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 1024;
+  canvas.height = 256;
+  const context = canvas.getContext("2d");
+  const colorsConfig = scenario.meta.colors;
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = "rgba(250, 252, 254, 0.93)";
+  roundRect(context, 18, 18, canvas.width - 36, canvas.height - 36, 22);
+  context.fill();
+  context.fillStyle = colorsConfig.accent;
+  roundRect(context, 18, 18, 12, canvas.height - 36, 8);
+  context.fill();
+  context.fillStyle = colorsConfig.accent;
+  context.font = "700 34px Inter, Segoe UI, Arial, sans-serif";
+  context.textBaseline = "top";
+  context.fillText(scenario.meta.author, 54, 42, 900);
+  context.fillStyle = colorsConfig.label;
+  context.font = "800 64px Inter, Segoe UI, Arial, sans-serif";
+  context.fillText(scenario.meta.title, 54, 82, 900);
+  context.fillStyle = "#475569";
+  context.font = "500 36px Inter, Segoe UI, Arial, sans-serif";
+  context.fillText(scenario.meta.subtitle, 54, 158, 900);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function refreshTitleCard() {
+  if (!titleCardSprite) {
+    titleCardSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: createTitleCardTexture(),
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+    }));
+    titleCardSprite.position.set(0, 2.35, -7.2);
+    titleCardSprite.scale.set(5.8, 1.45, 1);
+    camera.add(titleCardSprite);
+  } else {
+    titleCardSprite.material.map?.dispose();
+    titleCardSprite.material.map = createTitleCardTexture();
+    titleCardSprite.material.needsUpdate = true;
+  }
+  titleCardSprite.visible = appState.presentationMode || recordingPlayback;
 }
 
 function clearGroup(groupValue) {
@@ -724,72 +814,6 @@ function createTrackModuleObject(moduleRecord) {
   return moduleGroup;
 }
 
-function worldPosition(moduleRecord, localX, localY, localZ) {
-  const rotationValue = moduleRecord.rotation ?? 0;
-  const cosValue = Math.cos(rotationValue);
-  const sinValue = Math.sin(rotationValue);
-  return new THREE.Vector3(
-    moduleRecord.position[0] + localX * cosValue + localZ * sinValue,
-    localY,
-    moduleRecord.position[2] - localX * sinValue + localZ * cosValue,
-  );
-}
-
-function localDirectionToWorld(moduleRecord, localX, localZ) {
-  const rotationValue = moduleRecord.rotation ?? 0;
-  const cosValue = Math.cos(rotationValue);
-  const sinValue = Math.sin(rotationValue);
-  return new THREE.Vector3(
-    localX * cosValue + localZ * sinValue,
-    0,
-    -localX * sinValue + localZ * cosValue,
-  ).normalize();
-}
-
-function getModulePortDefinitions(moduleType) {
-  if (moduleType === "straight") {
-    return [
-      { id: "A", local: [-4, 0], direction: [-1, 0] },
-      { id: "B", local: [4, 0], direction: [1, 0] },
-    ];
-  }
-  if (moduleType === "station") {
-    return [
-      { id: "A", local: [-4.4, 0], direction: [-1, 0] },
-      { id: "B", local: [4.4, 0], direction: [1, 0] },
-    ];
-  }
-  if (moduleType === "curve") {
-    return [
-      { id: "A", local: [4, 0], direction: [1, 0] },
-      { id: "B", local: [0, 4], direction: [0, 1] },
-    ];
-  }
-  if (moduleType === "turnout") {
-    return [
-      { id: "A", local: [-4, 0], direction: [-1, 0] },
-      { id: "B", local: [4, 0], direction: [1, 0] },
-      { id: "C", local: [3.0, -1.35], direction: [0.96, -0.28] },
-    ];
-  }
-  return [];
-}
-
-function moduleHasPorts(moduleType) {
-  return getModulePortDefinitions(moduleType).length > 0;
-}
-
-function getWorldPorts(moduleRecord) {
-  return getModulePortDefinitions(moduleRecord.type).map((portDefinition) => ({
-    id: portDefinition.id,
-    moduleId: moduleRecord.id,
-    position: worldPosition(moduleRecord, portDefinition.local[0], 0.18, portDefinition.local[1]),
-    direction: localDirectionToWorld(moduleRecord, portDefinition.direction[0], portDefinition.direction[1]),
-    local: portDefinition.local,
-    localDirection: portDefinition.direction,
-  }));
-}
-
 function isPortConnected(moduleId, portId) {
   return scenario.connections.some(
     (connectionRecord) =>
@@ -858,11 +882,6 @@ function alignModulePortToTarget(moduleRecord, sourcePortId, targetPort) {
   return alignedRecord;
 }
 
-function normalizeRotation(rotationValue) {
-  const fullTurn = Math.PI * 2;
-  return ((rotationValue % fullTurn) + fullTurn) % fullTurn;
-}
-
 function getNearestTrackPoint(worldPoint) {
   let nearestPoint = null;
   scenario.trackModules.forEach((moduleRecord) => {
@@ -912,7 +931,7 @@ function createConflictObject(conflictRecord) {
   const conflictGroup = new THREE.Group();
   conflictGroup.userData.overlayType = "conflicts";
   const isHighSeverity = conflictRecord.severity === "high";
-  const colorValue = isHighSeverity ? colors.conflictHigh : colors.conflictLow;
+  const colorValue = isHighSeverity ? new THREE.Color(scenario.meta.colors.conflict) : new THREE.Color(colors.conflictLow);
   const ringMaterial = new THREE.MeshBasicMaterial({
     color: colorValue,
     transparent: true,
@@ -1666,7 +1685,7 @@ function duplicateSelected() {
     }
     pushHistory();
     const duplicateConflict = {
-      ...structuredClone(sourceConflict),
+      ...cloneJson(sourceConflict),
       id: nextId("c"),
       position: [sourceConflict.position[0] + gridSize, 0, sourceConflict.position[2] + gridSize],
       label: `${sourceConflict.label} copy`,
@@ -1685,7 +1704,7 @@ function duplicateSelected() {
     }
     pushHistory();
     const duplicateModule = {
-      ...structuredClone(sourceModule),
+      ...cloneJson(sourceModule),
       id: nextId("m"),
       position: [sourceModule.position[0] + gridSize, 0, sourceModule.position[2] + gridSize],
       name: sourceModule.name ? `${sourceModule.name} copy` : undefined,
@@ -1701,7 +1720,7 @@ function duplicateSelected() {
   if (selectedTrain) {
     pushHistory();
     const duplicateTrain = {
-      ...structuredClone(selectedTrain),
+      ...cloneJson(selectedTrain),
       id: nextId("t"),
       displayName: `${selectedTrain.displayName} copy`,
       startOffset: (selectedTrain.startOffset + 0.12) % 1,
@@ -1715,7 +1734,7 @@ function duplicateSelected() {
 
 function resetDemo() {
   pushHistory();
-  scenario = structuredClone(defaultScenario);
+  scenario = cloneJson(defaultScenario);
   selectedTrainId = scenario.trains[0]?.id ?? null;
   selectedModuleId = null;
   selectedConflictId = null;
@@ -2066,11 +2085,16 @@ function syncControls() {
     snapEnabledInput.checked = appState.snapEnabled;
   }
   document.body.classList.toggle("is-presenting", appState.presentationMode);
+  if (titleOverlay) {
+    titleOverlay.hidden = !appState.presentationMode && !recordingPlayback;
+  }
   if (presentationModeButton) {
     presentationModeButton.textContent = appState.presentationMode ? "Exit presentation" : "Presentation mode";
     presentationModeButton.classList.toggle("is-active", appState.presentationMode);
   }
   syncHistoryControls();
+  applySceneTheme();
+  syncProjectControls();
   updateTrainNameInput();
 }
 
@@ -2125,12 +2149,56 @@ function wireInterface() {
   });
 
   exportScreenshotButton?.addEventListener("click", () => {
-    renderer.render(scene, camera);
-    const screenshotLink = document.createElement("a");
-    screenshotLink.href = renderer.domElement.toDataURL("image/png");
-    screenshotLink.download = "rail-scenario-planner.png";
-    screenshotLink.click();
+    exportScreenshotPng();
   });
+
+  applyProjectButton?.addEventListener("click", () => {
+    pushHistory();
+    applyProjectMetadataFromControls();
+    applySceneTheme();
+    rebuildScenario();
+    scheduleUrlUpdate();
+  });
+
+  themePresetSelect?.addEventListener("change", () => {
+    pushHistory();
+    applyThemePreset(themePresetSelect.value);
+    scheduleUrlUpdate();
+  });
+
+  [projectTitleInput, projectSubtitleInput, projectAuthorInput, projectNotesInput, themeAccentInput, themePathInput, themeConflictInput, themeLabelInput].forEach((inputElement) => {
+    inputElement?.addEventListener("change", () => {
+      pushHistory();
+      applyProjectMetadataFromControls();
+      applySceneTheme();
+      rebuildScenario();
+      scheduleUrlUpdate();
+    });
+  });
+
+  saveNowButton?.addEventListener("click", () => saveScenarioToBrowser("Saved"));
+  clearBrowserSaveButton?.addEventListener("click", clearBrowserSave);
+  exportJsonButton?.addEventListener("click", exportScenarioJson);
+  importJsonButton?.addEventListener("click", () => importJsonFile?.click());
+  importJsonFile?.addEventListener("change", () => {
+    const selectedFile = importJsonFile.files?.[0];
+    if (selectedFile) {
+      importScenarioJson(selectedFile);
+    }
+    importJsonFile.value = "";
+  });
+
+  [playbackDurationInput, playbackFpsInput, playbackSpeedInput].forEach((inputElement) => {
+    inputElement?.addEventListener("input", () => {
+      updateExportSettingsFromControls();
+      scheduleAutosave();
+    });
+  });
+  playbackResetInput?.addEventListener("change", () => {
+    updateExportSettingsFromControls();
+    scheduleAutosave();
+  });
+  exportPlaybackButton?.addEventListener("click", exportPlaybackWebm);
 
   moduleNameInput?.addEventListener("change", () => {
     const selectedModule = selectedModuleId ? getModuleById(selectedModuleId) : null;
@@ -2489,6 +2557,12 @@ function animate() {
       commitScenarioToUrl();
     }
   }
+  if (autosaveTimer > 0) {
+    autosaveTimer -= deltaTime;
+    if (autosaveTimer <= 0) {
+      saveScenarioToBrowser();
+    }
+  }
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
 }
@@ -2507,4 +2581,9 @@ wireInterface();
 rebuildScenario();
 setCameraPreset(scenario.view?.preset ?? "overview");
 syncControls();
+if (restoredFromBrowser) {
+  setSaveState("saved", "Restored from browser");
+} else {
+  setSaveState("saved", "Saved");
+}
 animate();
