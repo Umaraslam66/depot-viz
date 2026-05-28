@@ -7,18 +7,31 @@ const toolButtons = [...document.querySelectorAll("[data-tool]")];
 const presetButtons = [...document.querySelectorAll("[data-preset]")];
 const rotateToolButton = document.querySelector("#rotate-tool");
 const clearSelectionButton = document.querySelector("#clear-selection");
+const snapEnabledInput = document.querySelector("#snap-enabled");
+const deleteSelectedButton = document.querySelector("#delete-selected");
+const duplicateSelectedButton = document.querySelector("#duplicate-selected");
+const undoButton = document.querySelector("#undo-action");
+const redoButton = document.querySelector("#redo-action");
+const rebuildRoutesButton = document.querySelector("#rebuild-routes");
+const resetDemoButton = document.querySelector("#reset-demo");
 const playPauseButton = document.querySelector("#play-pause");
 const resetTimeButton = document.querySelector("#reset-time");
 const followTrainButton = document.querySelector("#follow-train");
 const speedInput = document.querySelector("#scenario-speed");
 const speedValue = document.querySelector("#scenario-speed-value");
 const trainNameInput = document.querySelector("#train-name");
+const trainRouteSelect = document.querySelector("#train-route");
+const selectedTrainSpeedInput = document.querySelector("#train-speed");
+const selectedTrainSpeedValue = document.querySelector("#train-speed-value");
+const trainEnabledInput = document.querySelector("#train-enabled");
 const renameTrainButton = document.querySelector("#rename-train");
 const nextTrainButton = document.querySelector("#next-train");
 const labelsToggle = document.querySelector("#overlay-labels");
 const conflictsToggle = document.querySelector("#overlay-conflicts");
 const blocksToggle = document.querySelector("#overlay-blocks");
 const pathsToggle = document.querySelector("#overlay-paths");
+const connectionsToggle = document.querySelector("#overlay-connections");
+const validationToggle = document.querySelector("#overlay-validation");
 const readoutList = document.querySelector("#scenario-readout");
 const shareButton = document.querySelector("#share-scenario");
 
@@ -91,6 +104,9 @@ const colors = {
   conflictLow: 0xf59e0b,
   conflictHigh: 0xdc2626,
   selection: 0x38bdf8,
+  connection: 0x10b981,
+  validation: 0xef4444,
+  snapGrid: 0xf59e0b,
 };
 
 const materials = {
@@ -130,13 +146,47 @@ const materials = {
     depthWrite: false,
     side: THREE.DoubleSide,
   }),
+  connection: new THREE.MeshBasicMaterial({
+    color: colors.connection,
+    transparent: true,
+    opacity: 0.82,
+    depthWrite: false,
+  }),
+  validation: new THREE.MeshBasicMaterial({
+    color: colors.validation,
+    transparent: true,
+    opacity: 0.78,
+    depthWrite: false,
+  }),
+  previewValid: new THREE.MeshBasicMaterial({
+    color: colors.connection,
+    transparent: true,
+    opacity: 0.32,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  }),
+  previewGrid: new THREE.MeshBasicMaterial({
+    color: colors.snapGrid,
+    transparent: true,
+    opacity: 0.28,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  }),
+  previewBlocked: new THREE.MeshBasicMaterial({
+    color: colors.validation,
+    transparent: true,
+    opacity: 0.3,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  }),
 };
 
 const scenarioGroup = new THREE.Group();
 const labelGroup = new THREE.Group();
 const overlayGroup = new THREE.Group();
 const trainGroup = new THREE.Group();
-scene.add(scenarioGroup, overlayGroup, trainGroup, labelGroup);
+const previewGroup = new THREE.Group();
+scene.add(scenarioGroup, overlayGroup, trainGroup, labelGroup, previewGroup);
 
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
@@ -148,6 +198,7 @@ const trainObjects = new Map();
 const labelObjects = new Map();
 const conflictObjects = new Map();
 const pathCurves = new Map();
+const connectedRoutes = new Map();
 const clock = new THREE.Clock();
 const scratchVector = new THREE.Vector3();
 const scratchLookAt = new THREE.Vector3();
@@ -158,20 +209,30 @@ let desiredCameraPosition = camera.position.clone();
 let desiredCameraTarget = orbitControls.target.clone();
 let selectedTrainId = null;
 let selectedModuleId = null;
+let selectedConflictId = null;
 let activeTool = "straight";
 let toolRotation = 0;
 let followingTrain = false;
 let urlUpdateTimer = 0;
+let currentPlacementPreview = null;
+const undoStack = [];
+const redoStack = [];
+const maxHistoryEntries = 40;
+const snapTolerance = 3.1;
+const placementOverlapTolerance = 2.8;
 
 const appState = {
   running: true,
   time: 0,
   speed: Number(speedInput?.value ?? 1),
+  snapEnabled: true,
   overlays: {
     labels: true,
     conflicts: true,
     blocks: true,
     paths: true,
+    connections: true,
+    validation: true,
   },
 };
 
@@ -193,13 +254,24 @@ const defaultScenario = {
     { id: "m12", type: "signal", position: [-6, 0, -7], rotation: 0, name: "S12" },
     { id: "m13", type: "signal", position: [9, 0, -7], rotation: 0, name: "S18" },
   ],
-  connections: [],
+  connections: [
+    { fromModuleId: "m1", fromPortId: "B", toModuleId: "m2", toPortId: "A" },
+    { fromModuleId: "m2", fromPortId: "B", toModuleId: "m3", toPortId: "A" },
+    { fromModuleId: "m3", fromPortId: "B", toModuleId: "m4", toPortId: "A" },
+    { fromModuleId: "m4", fromPortId: "B", toModuleId: "m5", toPortId: "A" },
+    { fromModuleId: "m5", fromPortId: "B", toModuleId: "m6", toPortId: "A" },
+    { fromModuleId: "m6", fromPortId: "B", toModuleId: "m7", toPortId: "A" },
+    { fromModuleId: "m7", fromPortId: "B", toModuleId: "m8", toPortId: "A" },
+    { fromModuleId: "m9", fromPortId: "B", toModuleId: "m10", toPortId: "A" },
+    { fromModuleId: "m10", fromPortId: "B", toModuleId: "m11", toPortId: "A" },
+  ],
   trains: [
     {
       id: "t1",
       displayName: "IC-214",
       color: "#2563eb",
       route: "main",
+      selectedRouteId: "main",
       speed: 7.2,
       startOffset: 0,
       enabled: true,
@@ -209,6 +281,7 @@ const defaultScenario = {
       displayName: "RE-08",
       color: "#059669",
       route: "main",
+      selectedRouteId: "main",
       speed: 6.1,
       startOffset: 0.34,
       enabled: true,
@@ -218,6 +291,7 @@ const defaultScenario = {
       displayName: "FR-772",
       color: "#9333ea",
       route: "branch",
+      selectedRouteId: "branch",
       speed: 5.2,
       startOffset: 0.18,
       enabled: true,
@@ -258,11 +332,14 @@ const defaultScenario = {
   view: {
     preset: "overview",
     speed: 1,
+    snapEnabled: true,
     overlays: {
       labels: true,
       conflicts: true,
       blocks: true,
       paths: true,
+      connections: true,
+      validation: true,
     },
   },
 };
@@ -334,6 +411,7 @@ function encodeScenario() {
     view: {
       preset: scenario.view.preset,
       speed: appState.speed,
+      snapEnabled: appState.snapEnabled,
       overlays: appState.overlays,
     },
   };
@@ -349,6 +427,79 @@ function commitScenarioToUrl() {
   const nextUrl = new URL(window.location.href);
   nextUrl.searchParams.set("scenario", encodeScenario());
   window.history.replaceState(null, "", nextUrl);
+}
+
+function captureEditorState() {
+  return {
+    scenario: structuredClone(scenario),
+    selectedTrainId,
+    selectedModuleId,
+    selectedConflictId,
+    appState: {
+      running: appState.running,
+      time: appState.time,
+      speed: appState.speed,
+      snapEnabled: appState.snapEnabled,
+      overlays: { ...appState.overlays },
+    },
+    activeTool,
+    toolRotation,
+  };
+}
+
+function restoreEditorState(editorState) {
+  scenario = structuredClone(editorState.scenario);
+  selectedTrainId = editorState.selectedTrainId;
+  selectedModuleId = editorState.selectedModuleId;
+  selectedConflictId = editorState.selectedConflictId;
+  appState.running = editorState.appState.running;
+  appState.time = editorState.appState.time;
+  appState.speed = editorState.appState.speed;
+  appState.snapEnabled = editorState.appState.snapEnabled;
+  appState.overlays = { ...editorState.appState.overlays };
+  activeTool = editorState.activeTool;
+  toolRotation = editorState.toolRotation;
+  hydrateViewState();
+  selectTool(activeTool);
+  rebuildScenario();
+  updateSelectedTrain();
+  scheduleUrlUpdate();
+}
+
+function pushHistory() {
+  undoStack.push(captureEditorState());
+  if (undoStack.length > maxHistoryEntries) {
+    undoStack.shift();
+  }
+  redoStack.splice(0, redoStack.length);
+  syncHistoryControls();
+}
+
+function undoAction() {
+  if (undoStack.length === 0) {
+    return;
+  }
+  redoStack.push(captureEditorState());
+  restoreEditorState(undoStack.pop());
+  syncHistoryControls();
+}
+
+function redoAction() {
+  if (redoStack.length === 0) {
+    return;
+  }
+  undoStack.push(captureEditorState());
+  restoreEditorState(redoStack.pop());
+  syncHistoryControls();
+}
+
+function syncHistoryControls() {
+  if (undoButton) {
+    undoButton.disabled = undoStack.length === 0;
+  }
+  if (redoButton) {
+    redoButton.disabled = redoStack.length === 0;
+  }
 }
 
 function createGround() {
@@ -529,8 +680,164 @@ function worldPosition(moduleRecord, localX, localY, localZ) {
   );
 }
 
+function localDirectionToWorld(moduleRecord, localX, localZ) {
+  const rotationValue = moduleRecord.rotation ?? 0;
+  const cosValue = Math.cos(rotationValue);
+  const sinValue = Math.sin(rotationValue);
+  return new THREE.Vector3(
+    localX * cosValue + localZ * sinValue,
+    0,
+    -localX * sinValue + localZ * cosValue,
+  ).normalize();
+}
+
+function getModulePortDefinitions(moduleType) {
+  if (moduleType === "straight") {
+    return [
+      { id: "A", local: [-4, 0], direction: [-1, 0] },
+      { id: "B", local: [4, 0], direction: [1, 0] },
+    ];
+  }
+  if (moduleType === "station") {
+    return [
+      { id: "A", local: [-4.4, 0], direction: [-1, 0] },
+      { id: "B", local: [4.4, 0], direction: [1, 0] },
+    ];
+  }
+  if (moduleType === "curve") {
+    return [
+      { id: "A", local: [4, 0], direction: [1, 0] },
+      { id: "B", local: [0, 4], direction: [0, 1] },
+    ];
+  }
+  if (moduleType === "turnout") {
+    return [
+      { id: "A", local: [-4, 0], direction: [-1, 0] },
+      { id: "B", local: [4, 0], direction: [1, 0] },
+      { id: "C", local: [3.0, -1.35], direction: [0.96, -0.28] },
+    ];
+  }
+  return [];
+}
+
+function moduleHasPorts(moduleType) {
+  return getModulePortDefinitions(moduleType).length > 0;
+}
+
+function getWorldPorts(moduleRecord) {
+  return getModulePortDefinitions(moduleRecord.type).map((portDefinition) => ({
+    id: portDefinition.id,
+    moduleId: moduleRecord.id,
+    position: worldPosition(moduleRecord, portDefinition.local[0], 0.18, portDefinition.local[1]),
+    direction: localDirectionToWorld(moduleRecord, portDefinition.direction[0], portDefinition.direction[1]),
+    local: portDefinition.local,
+    localDirection: portDefinition.direction,
+  }));
+}
+
+function isPortConnected(moduleId, portId) {
+  return scenario.connections.some(
+    (connectionRecord) =>
+      (connectionRecord.fromModuleId === moduleId && connectionRecord.fromPortId === portId) ||
+      (connectionRecord.toModuleId === moduleId && connectionRecord.toPortId === portId),
+  );
+}
+
+function findNearestOpenPort(worldPoint, excludeModuleId = null) {
+  let nearestPort = null;
+  scenario.trackModules.forEach((moduleRecord) => {
+    if (moduleRecord.id === excludeModuleId || !moduleHasPorts(moduleRecord.type)) {
+      return;
+    }
+    getWorldPorts(moduleRecord).forEach((portRecord) => {
+      if (isPortConnected(moduleRecord.id, portRecord.id)) {
+        return;
+      }
+      const portDistance = portRecord.position.distanceTo(worldPoint);
+      if (portDistance <= snapTolerance && (!nearestPort || portDistance < nearestPort.distance)) {
+        nearestPort = {
+          ...portRecord,
+          distance: portDistance,
+        };
+      }
+    });
+  });
+  return nearestPort;
+}
+
+function getPreferredSourcePort(moduleType, targetPort) {
+  const sourcePorts = getModulePortDefinitions(moduleType);
+  if (sourcePorts.length === 0) {
+    return null;
+  }
+  if (sourcePorts.some((portRecord) => portRecord.id === "A")) {
+    return "A";
+  }
+  return sourcePorts[0].id;
+}
+
+function alignModulePortToTarget(moduleRecord, sourcePortId, targetPort) {
+  const sourcePort = getModulePortDefinitions(moduleRecord.type).find((portRecord) => portRecord.id === sourcePortId);
+  if (!sourcePort) {
+    return moduleRecord;
+  }
+  const localDirectionAngle = Math.atan2(sourcePort.direction[1], sourcePort.direction[0]);
+  const desiredDirection = targetPort.direction.clone().multiplyScalar(-1);
+  const desiredDirectionAngle = Math.atan2(desiredDirection.z, desiredDirection.x);
+  const nextRotation = localDirectionAngle - desiredDirectionAngle;
+  const alignedRecord = {
+    ...moduleRecord,
+    rotation: normalizeRotation(nextRotation),
+  };
+  const sourceWorldAtOrigin = worldPosition(
+    { ...alignedRecord, position: [0, 0, 0] },
+    sourcePort.local[0],
+    0.18,
+    sourcePort.local[1],
+  );
+  alignedRecord.position = [
+    targetPort.position.x - sourceWorldAtOrigin.x,
+    0,
+    targetPort.position.z - sourceWorldAtOrigin.z,
+  ];
+  return alignedRecord;
+}
+
+function normalizeRotation(rotationValue) {
+  const fullTurn = Math.PI * 2;
+  return ((rotationValue % fullTurn) + fullTurn) % fullTurn;
+}
+
+function getNearestTrackPoint(worldPoint) {
+  let nearestPoint = null;
+  scenario.trackModules.forEach((moduleRecord) => {
+    const modulePosition = new THREE.Vector3(moduleRecord.position[0], 0, moduleRecord.position[2]);
+    const distanceValue = modulePosition.distanceTo(worldPoint);
+    if (distanceValue <= 5.5 && (!nearestPoint || distanceValue < nearestPoint.distance)) {
+      nearestPoint = {
+        position: modulePosition,
+        moduleId: moduleRecord.id,
+        distance: distanceValue,
+      };
+    }
+  });
+  return nearestPoint;
+}
+
+function moduleOverlaps(moduleRecord, excludeModuleId = null) {
+  return scenario.trackModules.some((existingModule) => {
+    if (existingModule.id === excludeModuleId) {
+      return false;
+    }
+    const existingPosition = new THREE.Vector3(existingModule.position[0], 0, existingModule.position[2]);
+    const modulePosition = new THREE.Vector3(moduleRecord.position[0], 0, moduleRecord.position[2]);
+    return existingPosition.distanceTo(modulePosition) < placementOverlapTolerance;
+  });
+}
+
 function createConflictObject(conflictRecord) {
   const conflictGroup = new THREE.Group();
+  conflictGroup.userData.overlayType = "conflicts";
   const isHighSeverity = conflictRecord.severity === "high";
   const colorValue = isHighSeverity ? colors.conflictHigh : colors.conflictLow;
   const ringMaterial = new THREE.MeshBasicMaterial({
@@ -559,6 +866,12 @@ function createConflictObject(conflictRecord) {
   poleMesh.position.y = 1.15;
   conflictGroup.add(poleMesh);
   conflictGroup.position.set(conflictRecord.position[0], 0, conflictRecord.position[2]);
+  if (selectedConflictId === conflictRecord.id) {
+    const selectionMesh = new THREE.Mesh(new THREE.RingGeometry(2.15, 2.55, 42), materials.selection);
+    selectionMesh.rotation.x = -Math.PI * 0.5;
+    selectionMesh.position.y = 0.18;
+    conflictGroup.add(selectionMesh);
+  }
   createLabelSprite(conflictRecord.label, new THREE.Vector3(conflictRecord.position[0], 3.15, conflictRecord.position[2]), {
     background: isHighSeverity ? "rgba(254, 242, 242, 0.96)" : "rgba(255, 251, 235, 0.96)",
     border: isHighSeverity ? "rgba(220, 38, 38, 0.85)" : "rgba(217, 119, 6, 0.85)",
@@ -598,9 +911,75 @@ function getBranchRoutePoints() {
   ];
 }
 
+function getModuleById(moduleId) {
+  return scenario.trackModules.find((moduleRecord) => moduleRecord.id === moduleId);
+}
+
+function getConnectionNeighbors(moduleId) {
+  return scenario.connections
+    .map((connectionRecord) => {
+      if (connectionRecord.fromModuleId === moduleId) {
+        return connectionRecord.toModuleId;
+      }
+      if (connectionRecord.toModuleId === moduleId) {
+        return connectionRecord.fromModuleId;
+      }
+      return null;
+    })
+    .filter(Boolean);
+}
+
+function rebuildRoutesFromConnections() {
+  connectedRoutes.clear();
+  if (scenario.connections.length === 0) {
+    return;
+  }
+
+  const connectedModuleIds = [...new Set(scenario.connections.flatMap((connectionRecord) => [
+    connectionRecord.fromModuleId,
+    connectionRecord.toModuleId,
+  ]))].filter((moduleId) => getModuleById(moduleId));
+  if (connectedModuleIds.length < 2) {
+    return;
+  }
+
+  const endpointModuleId =
+    connectedModuleIds.find((moduleId) => getConnectionNeighbors(moduleId).length === 1) ?? connectedModuleIds[0];
+  const orderedModuleIds = [];
+  const visitedModuleIds = new Set();
+  let currentModuleId = endpointModuleId;
+  let previousModuleId = null;
+
+  while (currentModuleId && !visitedModuleIds.has(currentModuleId)) {
+    orderedModuleIds.push(currentModuleId);
+    visitedModuleIds.add(currentModuleId);
+    const nextModuleId = getConnectionNeighbors(currentModuleId).find((moduleId) => moduleId !== previousModuleId);
+    previousModuleId = currentModuleId;
+    currentModuleId = nextModuleId;
+  }
+
+  const routePoints = orderedModuleIds
+    .map((moduleId) => getModuleById(moduleId))
+    .filter(Boolean)
+    .map((moduleRecord) => new THREE.Vector3(moduleRecord.position[0], 0.45, moduleRecord.position[2]));
+
+  if (routePoints.length >= 2) {
+    connectedRoutes.set("connected", new THREE.CatmullRomCurve3(routePoints, false, "centripetal", 0.08));
+  }
+}
+
 function getRouteCurve(routeName) {
   if (pathCurves.has(routeName)) {
     return pathCurves.get(routeName);
+  }
+  if (routeName === "connected") {
+    rebuildRoutesFromConnections();
+    const connectedRoute = connectedRoutes.get("connected");
+    if (connectedRoute) {
+      pathCurves.set(routeName, connectedRoute);
+      return connectedRoute;
+    }
+    return null;
   }
   const routePoints = routeName === "branch" ? getBranchRoutePoints() : getMainRoutePoints();
   const routeCurve = new THREE.CatmullRomCurve3(routePoints, routeName !== "branch", "centripetal", 0.08);
@@ -610,9 +989,31 @@ function getRouteCurve(routeName) {
 
 function createPathOverlay(routeName) {
   const routeCurve = getRouteCurve(routeName);
+  if (!routeCurve) {
+    return null;
+  }
   const points = routeCurve.getSpacedPoints(routeName === "branch" ? 90 : 180);
   const geometry = new THREE.BufferGeometry().setFromPoints(points);
   return new THREE.Line(geometry, materials.path);
+}
+
+function findClosestRouteRatio(routeName, worldPoint) {
+  const routeCurve = getRouteCurve(routeName);
+  if (!routeCurve) {
+    return 0;
+  }
+  let bestRatio = 0;
+  let bestDistance = Infinity;
+  for (let sampleIndex = 0; sampleIndex <= 120; sampleIndex += 1) {
+    const ratioValue = sampleIndex / 120;
+    const samplePoint = routeCurve.getPointAt(ratioValue);
+    const distanceValue = samplePoint.distanceTo(worldPoint);
+    if (distanceValue < bestDistance) {
+      bestDistance = distanceValue;
+      bestRatio = ratioValue;
+    }
+  }
+  return bestRatio;
 }
 
 function createTrainObject(trainRecord) {
@@ -662,16 +1063,16 @@ function createTrainObject(trainRecord) {
 
 function updateOverlayVisibility() {
   labelGroup.visible = appState.overlays.labels;
-  overlayGroup.children.forEach((overlayObject) => {
-    overlayObject.visible = true;
+  overlayGroup.children.forEach((childObject) => {
+    const overlayType = childObject.userData.overlayType;
+    if (overlayType && Object.hasOwn(appState.overlays, overlayType)) {
+      childObject.visible = appState.overlays[overlayType];
+      return;
+    }
+    childObject.visible = true;
   });
   conflictObjects.forEach((conflictObject) => {
     conflictObject.visible = appState.overlays.conflicts;
-  });
-  overlayGroup.children.forEach((childObject) => {
-    if (childObject.isLine) {
-      childObject.visible = appState.overlays.paths;
-    }
   });
 }
 
@@ -695,13 +1096,27 @@ function updateTrainNameInput() {
   if (trainNameInput && selectedTrain) {
     trainNameInput.value = selectedTrain.displayName;
   }
+  if (trainRouteSelect && selectedTrain) {
+    trainRouteSelect.value = selectedTrain.selectedRouteId ?? selectedTrain.route ?? "main";
+  }
+  if (selectedTrainSpeedInput && selectedTrain) {
+    selectedTrainSpeedInput.value = String(selectedTrain.speed);
+  }
+  if (selectedTrainSpeedValue && selectedTrain) {
+    selectedTrainSpeedValue.textContent = selectedTrain.speed.toFixed(1);
+  }
+  if (trainEnabledInput && selectedTrain) {
+    trainEnabledInput.checked = selectedTrain.enabled;
+  }
 }
 
 function updateReadout() {
   const activeConflicts = scenario.conflicts.filter((conflictRecord) => conflictRecord.active);
   const enabledTrains = scenario.trains.filter((trainRecord) => trainRecord.enabled);
+  const validationWarnings = validateScenario();
   const items = [
     `${enabledTrains.length} trains active across ${scenario.trackModules.length} planning objects.`,
+    `${scenario.connections.length} endpoint connections, ${validationWarnings.length} validation warnings.`,
     "Block occupancy shown as blue section bands.",
   ];
 
@@ -713,12 +1128,16 @@ function updateReadout() {
     items.push(`${conflictRecord.label}${trainNames ? `: ${trainNames}` : ""}`);
   });
 
+  validationWarnings.slice(0, 4).forEach((warningRecord) => {
+    items.push(warningRecord.message);
+  });
+
   readoutList.replaceChildren(
     ...items.map((itemText, itemIndex) => {
       const listItem = document.createElement("li");
       listItem.textContent = itemText;
-      if (itemIndex >= 2) {
-        listItem.className = itemText.toLowerCase().includes("maintenance") ? "is-danger" : "is-warning";
+      if (itemIndex >= 3) {
+        listItem.className = itemText.toLowerCase().includes("overlap") ? "is-danger" : "is-warning";
       }
       return listItem;
     }),
@@ -759,38 +1178,54 @@ function nextId(prefix) {
 }
 
 function addScenarioObject(positionValue) {
-  const snappedPosition = [snapToGrid(positionValue.x), 0, snapToGrid(positionValue.z)];
+  const placementPlan = getPlacementPlan(positionValue);
+  if (placementPlan.blocked) {
+    return;
+  }
+  pushHistory();
 
   if (activeTool === "train") {
+    const selectedRouteValue = trainRouteSelect?.value ?? (placementPlan.position[2] > 4 ? "branch" : "main");
+    const trainStartPoint = new THREE.Vector3(placementPlan.position[0], 0.45, placementPlan.position[2]);
     const trainRecord = {
       id: nextId("t"),
       displayName: `Train ${scenario.trains.length + 1}`,
       color: ["#2563eb", "#059669", "#d97706", "#9333ea", "#dc2626"][scenario.trains.length % 5],
-      route: snappedPosition[2] > 4 ? "branch" : "main",
+      route: selectedRouteValue,
+      selectedRouteId: selectedRouteValue,
       speed: 5.8 + (scenario.trains.length % 3) * 0.7,
-      startOffset: (scenario.trains.length * 0.18) % 1,
+      startOffset: findClosestRouteRatio(selectedRouteValue, trainStartPoint),
       enabled: true,
     };
     scenario.trains.push(trainRecord);
     selectedTrainId = trainRecord.id;
+    selectedModuleId = null;
+    selectedConflictId = null;
   } else if (activeTool === "conflict") {
-    scenario.conflicts.push({
+    const conflictRecord = {
       id: nextId("c"),
       type: "headway",
       severity: "medium",
-      position: snappedPosition,
+      position: placementPlan.position,
       affectedModuleIds: [],
       affectedTrainIds: scenario.trains.slice(0, 2).map((trainRecord) => trainRecord.id),
       label: "Headway conflict",
       active: true,
-    });
+    };
+    scenario.conflicts.push(conflictRecord);
+    selectedConflictId = conflictRecord.id;
+    selectedModuleId = null;
   } else {
     const moduleRecord = {
       id: nextId("m"),
       type: activeTool,
-      position: snappedPosition,
+      position: placementPlan.position,
       rotation: toolRotation,
     };
+    if (placementPlan.alignedModule) {
+      moduleRecord.position = placementPlan.alignedModule.position;
+      moduleRecord.rotation = placementPlan.alignedModule.rotation;
+    }
     if (activeTool === "station") {
       moduleRecord.name = `Station ${scenario.trackModules.filter((moduleValue) => moduleValue.type === "station").length + 1}`;
     }
@@ -801,11 +1236,222 @@ function addScenarioObject(positionValue) {
       moduleRecord.name = `S${scenario.trackModules.filter((moduleValue) => moduleValue.type === "signal").length + 1}`;
     }
     scenario.trackModules.push(moduleRecord);
+    if (placementPlan.connection) {
+      scenario.connections.push({
+        fromModuleId: placementPlan.connection.target.moduleId,
+        fromPortId: placementPlan.connection.target.id,
+        toModuleId: moduleRecord.id,
+        toPortId: placementPlan.connection.sourcePortId,
+      });
+    }
     selectedModuleId = moduleRecord.id;
+    selectedConflictId = null;
   }
 
   rebuildScenario();
   scheduleUrlUpdate();
+}
+
+function getPlacementPlan(positionValue) {
+  if (activeTool === "train" || activeTool === "conflict" || activeTool === "signal") {
+    const nearestTrackPoint = getNearestTrackPoint(positionValue);
+    const basePosition = nearestTrackPoint
+      ? [nearestTrackPoint.position.x, 0, nearestTrackPoint.position.z]
+      : [snapToGrid(positionValue.x), 0, snapToGrid(positionValue.z)];
+    return {
+      position: basePosition,
+      mode: nearestTrackPoint ? "track" : "grid",
+      blocked: false,
+    };
+  }
+
+  let moduleRecord = {
+    id: "__preview",
+    type: activeTool,
+    position: [snapToGrid(positionValue.x), 0, snapToGrid(positionValue.z)],
+    rotation: toolRotation,
+  };
+  const targetPort = appState.snapEnabled && moduleHasPorts(activeTool) ? findNearestOpenPort(positionValue) : null;
+  let connection = null;
+
+  if (targetPort) {
+    const sourcePortId = getPreferredSourcePort(activeTool, targetPort);
+    moduleRecord = alignModulePortToTarget(moduleRecord, sourcePortId, targetPort);
+    connection = { target: targetPort, sourcePortId };
+  }
+
+  const blocked = moduleOverlaps(moduleRecord) && !connection;
+  return {
+    position: moduleRecord.position,
+    alignedModule: moduleRecord,
+    connection,
+    mode: connection ? "connection" : "grid",
+    blocked,
+  };
+}
+
+function updatePlacementPreview(positionValue) {
+  currentPlacementPreview = getPlacementPlan(positionValue);
+  clearGroup(previewGroup);
+  const previewMaterial = currentPlacementPreview.blocked
+    ? materials.previewBlocked
+    : currentPlacementPreview.mode === "connection"
+      ? materials.previewValid
+      : materials.previewGrid;
+  const previewPosition = currentPlacementPreview.alignedModule?.position ?? currentPlacementPreview.position;
+  const previewRing = new THREE.Mesh(new THREE.RingGeometry(1.7, 2.25, 48), previewMaterial);
+  previewRing.rotation.x = -Math.PI * 0.5;
+  previewRing.position.set(previewPosition[0], 0.24, previewPosition[2]);
+  previewGroup.add(previewRing);
+
+  if (currentPlacementPreview.connection) {
+    const targetMarker = new THREE.Mesh(new THREE.SphereGeometry(0.36, 18, 12), materials.connection);
+    targetMarker.position.copy(currentPlacementPreview.connection.target.position);
+    targetMarker.position.y += 0.25;
+    previewGroup.add(targetMarker);
+  }
+}
+
+function clearPlacementPreview() {
+  currentPlacementPreview = null;
+  clearGroup(previewGroup);
+}
+
+function removeConnectionsForModule(moduleId) {
+  scenario.connections = scenario.connections.filter(
+    (connectionRecord) => connectionRecord.fromModuleId !== moduleId && connectionRecord.toModuleId !== moduleId,
+  );
+}
+
+function deleteSelected() {
+  if (selectedConflictId) {
+    pushHistory();
+    scenario.conflicts = scenario.conflicts.filter((conflictRecord) => conflictRecord.id !== selectedConflictId);
+    selectedConflictId = null;
+    rebuildScenario();
+    scheduleUrlUpdate();
+    return;
+  }
+
+  if (selectedModuleId) {
+    pushHistory();
+    scenario.trackModules = scenario.trackModules.filter((moduleRecord) => moduleRecord.id !== selectedModuleId);
+    removeConnectionsForModule(selectedModuleId);
+    scenario.conflicts.forEach((conflictRecord) => {
+      conflictRecord.affectedModuleIds = conflictRecord.affectedModuleIds.filter((moduleId) => moduleId !== selectedModuleId);
+    });
+    selectedModuleId = null;
+    rebuildScenario();
+    scheduleUrlUpdate();
+    return;
+  }
+
+  if (selectedTrainId) {
+    pushHistory();
+    scenario.trains = scenario.trains.filter((trainRecord) => trainRecord.id !== selectedTrainId);
+    scenario.conflicts.forEach((conflictRecord) => {
+      conflictRecord.affectedTrainIds = conflictRecord.affectedTrainIds.filter((trainId) => trainId !== selectedTrainId);
+    });
+    selectedTrainId = scenario.trains[0]?.id ?? null;
+    rebuildScenario();
+    scheduleUrlUpdate();
+  }
+}
+
+function duplicateSelected() {
+  if (selectedConflictId) {
+    const sourceConflict = scenario.conflicts.find((conflictRecord) => conflictRecord.id === selectedConflictId);
+    if (!sourceConflict) {
+      return;
+    }
+    pushHistory();
+    const duplicateConflict = {
+      ...structuredClone(sourceConflict),
+      id: nextId("c"),
+      position: [sourceConflict.position[0] + gridSize, 0, sourceConflict.position[2] + gridSize],
+      label: `${sourceConflict.label} copy`,
+    };
+    scenario.conflicts.push(duplicateConflict);
+    selectedConflictId = duplicateConflict.id;
+    rebuildScenario();
+    scheduleUrlUpdate();
+    return;
+  }
+
+  if (selectedModuleId) {
+    const sourceModule = getModuleById(selectedModuleId);
+    if (!sourceModule) {
+      return;
+    }
+    pushHistory();
+    const duplicateModule = {
+      ...structuredClone(sourceModule),
+      id: nextId("m"),
+      position: [sourceModule.position[0] + gridSize, 0, sourceModule.position[2] + gridSize],
+      name: sourceModule.name ? `${sourceModule.name} copy` : undefined,
+    };
+    scenario.trackModules.push(duplicateModule);
+    selectedModuleId = duplicateModule.id;
+    rebuildScenario();
+    scheduleUrlUpdate();
+    return;
+  }
+
+  const selectedTrain = scenario.trains.find((trainRecord) => trainRecord.id === selectedTrainId);
+  if (selectedTrain) {
+    pushHistory();
+    const duplicateTrain = {
+      ...structuredClone(selectedTrain),
+      id: nextId("t"),
+      displayName: `${selectedTrain.displayName} copy`,
+      startOffset: (selectedTrain.startOffset + 0.12) % 1,
+    };
+    scenario.trains.push(duplicateTrain);
+    selectedTrainId = duplicateTrain.id;
+    rebuildScenario();
+    scheduleUrlUpdate();
+  }
+}
+
+function resetDemo() {
+  pushHistory();
+  scenario = structuredClone(defaultScenario);
+  selectedTrainId = scenario.trains[0]?.id ?? null;
+  selectedModuleId = null;
+  selectedConflictId = null;
+  appState.time = 0;
+  hydrateViewState();
+  rebuildScenario();
+  setCameraPreset("overview");
+  scheduleUrlUpdate();
+}
+
+function selectNearestModule(worldPoint) {
+  let nearestModule = null;
+  scenario.trackModules.forEach((moduleRecord) => {
+    const modulePosition = new THREE.Vector3(moduleRecord.position[0], 0, moduleRecord.position[2]);
+    const distanceValue = modulePosition.distanceTo(worldPoint);
+    if (distanceValue <= 5 && (!nearestModule || distanceValue < nearestModule.distance)) {
+      nearestModule = { moduleRecord, distance: distanceValue };
+    }
+  });
+  let nearestConflict = null;
+  scenario.conflicts.forEach((conflictRecord) => {
+    const conflictPosition = new THREE.Vector3(conflictRecord.position[0], 0, conflictRecord.position[2]);
+    const distanceValue = conflictPosition.distanceTo(worldPoint);
+    if (distanceValue <= 5 && (!nearestConflict || distanceValue < nearestConflict.distance)) {
+      nearestConflict = { conflictRecord, distance: distanceValue };
+    }
+  });
+
+  if (nearestConflict && (!nearestModule || nearestConflict.distance < nearestModule.distance)) {
+    selectedConflictId = nearestConflict.conflictRecord.id;
+    selectedModuleId = null;
+  } else {
+    selectedModuleId = nearestModule?.moduleRecord.id ?? null;
+    selectedConflictId = null;
+  }
+  rebuildScenario();
 }
 
 function createOccupancyBand(trainRecord, positionValue, tangentValue) {
@@ -815,6 +1461,7 @@ function createOccupancyBand(trainRecord, positionValue, tangentValue) {
   bandMesh.position.copy(positionValue);
   bandMesh.position.y = 0.12;
   bandMesh.rotation.z = Math.atan2(-tangentValue.z, tangentValue.x);
+  bandMesh.userData.overlayType = "blocks";
   bandMesh.visible = appState.overlays.blocks;
   overlayGroup.add(bandMesh);
   return { trainId: trainRecord.id, mesh: bandMesh };
@@ -828,10 +1475,103 @@ function rebuildOccupancyBands() {
     if (!trainRecord.enabled) {
       return;
     }
-    const routeCurve = getRouteCurve(trainRecord.route);
+    const routeCurve = getRouteCurve(trainRecord.selectedRouteId ?? trainRecord.route);
+    if (!routeCurve) {
+      return;
+    }
     const positionValue = routeCurve.getPointAt(trainRecord.startOffset);
     const tangentValue = routeCurve.getTangentAt(trainRecord.startOffset).normalize();
     occupancyBands.push(createOccupancyBand(trainRecord, positionValue, tangentValue));
+  });
+}
+
+function createConnectionOverlays() {
+  scenario.trackModules.forEach((moduleRecord) => {
+    getWorldPorts(moduleRecord).forEach((portRecord) => {
+      const portMaterial = isPortConnected(moduleRecord.id, portRecord.id)
+        ? materials.connection
+        : materials.connection.clone();
+      if (!isPortConnected(moduleRecord.id, portRecord.id)) {
+        portMaterial.opacity = 0.34;
+      }
+      const portMesh = new THREE.Mesh(new THREE.SphereGeometry(0.22, 16, 12), portMaterial);
+      portMesh.position.copy(portRecord.position);
+      portMesh.userData.overlayType = "connections";
+      overlayGroup.add(portMesh);
+    });
+  });
+
+  scenario.connections.forEach((connectionRecord) => {
+    const fromModule = getModuleById(connectionRecord.fromModuleId);
+    const toModule = getModuleById(connectionRecord.toModuleId);
+    if (!fromModule || !toModule) {
+      return;
+    }
+    const fromPort = getWorldPorts(fromModule).find((portRecord) => portRecord.id === connectionRecord.fromPortId);
+    const toPort = getWorldPorts(toModule).find((portRecord) => portRecord.id === connectionRecord.toPortId);
+    if (!fromPort || !toPort) {
+      return;
+    }
+    const lineGeometry = new THREE.BufferGeometry().setFromPoints([fromPort.position, toPort.position]);
+    const lineMesh = new THREE.Line(lineGeometry, new THREE.LineBasicMaterial({
+      color: colors.connection,
+      transparent: true,
+      opacity: 0.66,
+    }));
+    lineMesh.userData.overlayType = "connections";
+    overlayGroup.add(lineMesh);
+  });
+}
+
+function validateScenario() {
+  const warnings = [];
+  scenario.trackModules.forEach((moduleRecord) => {
+    getWorldPorts(moduleRecord).forEach((portRecord) => {
+      if (!isPortConnected(moduleRecord.id, portRecord.id)) {
+        warnings.push({
+          type: "disconnected-port",
+          message: `${moduleRecord.name ?? moduleRecord.type} has open port ${portRecord.id}.`,
+          position: portRecord.position,
+        });
+      }
+    });
+  });
+
+  scenario.trackModules.forEach((moduleRecord, moduleIndex) => {
+    const modulePosition = new THREE.Vector3(moduleRecord.position[0], 0, moduleRecord.position[2]);
+    scenario.trackModules.slice(moduleIndex + 1).forEach((otherModule) => {
+      const otherPosition = new THREE.Vector3(otherModule.position[0], 0, otherModule.position[2]);
+      if (modulePosition.distanceTo(otherPosition) < placementOverlapTolerance) {
+        warnings.push({
+          type: "overlap",
+          message: `${moduleRecord.name ?? moduleRecord.type} overlaps ${otherModule.name ?? otherModule.type}.`,
+          position: modulePosition.clone().lerp(otherPosition, 0.5),
+        });
+      }
+    });
+  });
+
+  scenario.trains.forEach((trainRecord) => {
+    if ((trainRecord.selectedRouteId ?? trainRecord.route) === "connected" && !connectedRoutes.has("connected")) {
+      warnings.push({
+        type: "route",
+        message: `${trainRecord.displayName} has no complete connected route.`,
+        position: new THREE.Vector3(0, 0.1, 0),
+      });
+    }
+  });
+
+  return warnings;
+}
+
+function createValidationOverlays(validationWarnings) {
+  validationWarnings.forEach((warningRecord) => {
+    const markerMesh = new THREE.Mesh(new THREE.RingGeometry(0.58, 0.78, 24), materials.validation);
+    markerMesh.rotation.x = -Math.PI * 0.5;
+    markerMesh.position.copy(warningRecord.position);
+    markerMesh.position.y = 0.22;
+    markerMesh.userData.overlayType = "validation";
+    overlayGroup.add(markerMesh);
   });
 }
 
@@ -852,8 +1592,13 @@ function rebuildScenario() {
     moduleObjects.set(moduleRecord.id, moduleObject);
   });
 
-  ["main", "branch"].forEach((routeName) => {
+  rebuildRoutesFromConnections();
+  ["main", "branch", "connected"].forEach((routeName) => {
     const overlay = createPathOverlay(routeName);
+    if (!overlay) {
+      return;
+    }
+    overlay.userData.overlayType = "paths";
     overlay.visible = appState.overlays.paths;
     overlayGroup.add(overlay);
   });
@@ -881,6 +1626,8 @@ function rebuildScenario() {
     conflictObjects.set(conflictRecord.id, conflictObject);
   });
 
+  createConnectionOverlays();
+  createValidationOverlays(validateScenario());
   rebuildOccupancyBands();
   updateTrainNameInput();
   updateReadout();
@@ -898,7 +1645,11 @@ function updateTrainPositions(deltaTime) {
     if (!trainObject || !trainRecord.enabled) {
       return;
     }
-    const routeCurve = getRouteCurve(trainRecord.route);
+    const routeCurve = getRouteCurve(trainRecord.selectedRouteId ?? trainRecord.route);
+    if (!routeCurve) {
+      trainObject.visible = true;
+      return;
+    }
     const routeLength = routeCurve.getLength();
     const ratio = ((trainRecord.startOffset + (appState.time * trainRecord.speed) / routeLength) % 1 + 1) % 1;
     const positionValue = routeCurve.getPointAt(ratio);
@@ -981,6 +1732,11 @@ function syncControls() {
   if (playPauseButton) {
     playPauseButton.textContent = appState.running ? "Pause" : "Play";
   }
+  if (snapEnabledInput) {
+    snapEnabledInput.checked = appState.snapEnabled;
+  }
+  syncHistoryControls();
+  updateTrainNameInput();
 }
 
 function selectTool(toolName) {
@@ -999,12 +1755,31 @@ function wireInterface() {
     toolRotation = (toolRotation + Math.PI * 0.5) % (Math.PI * 2);
   });
 
+  snapEnabledInput?.addEventListener("change", () => {
+    pushHistory();
+    appState.snapEnabled = snapEnabledInput.checked;
+    scenario.view.snapEnabled = appState.snapEnabled;
+    syncControls();
+    scheduleUrlUpdate();
+  });
+
   clearSelectionButton?.addEventListener("click", () => {
     selectedModuleId = null;
+    selectedConflictId = null;
     followingTrain = false;
     followTrainButton?.classList.remove("is-active");
     rebuildScenario();
   });
+
+  deleteSelectedButton?.addEventListener("click", deleteSelected);
+  duplicateSelectedButton?.addEventListener("click", duplicateSelected);
+  undoButton?.addEventListener("click", undoAction);
+  redoButton?.addEventListener("click", redoAction);
+  rebuildRoutesButton?.addEventListener("click", () => {
+    rebuildRoutesFromConnections();
+    rebuildScenario();
+  });
+  resetDemoButton?.addEventListener("click", resetDemo);
 
   playPauseButton?.addEventListener("click", () => {
     appState.running = !appState.running;
@@ -1035,7 +1810,53 @@ function wireInterface() {
     if (!selectedTrain || !trainNameInput.value.trim()) {
       return;
     }
+    pushHistory();
     selectedTrain.displayName = trainNameInput.value.trim();
+    rebuildScenario();
+    scheduleUrlUpdate();
+  });
+
+  trainRouteSelect?.addEventListener("change", () => {
+    const selectedTrain = scenario.trains.find((trainRecord) => trainRecord.id === selectedTrainId);
+    if (!selectedTrain) {
+      return;
+    }
+    pushHistory();
+    selectedTrain.selectedRouteId = trainRouteSelect.value;
+    selectedTrain.route = trainRouteSelect.value;
+    rebuildScenario();
+    scheduleUrlUpdate();
+  });
+
+  selectedTrainSpeedInput?.addEventListener("input", () => {
+    const selectedTrain = scenario.trains.find((trainRecord) => trainRecord.id === selectedTrainId);
+    if (!selectedTrain) {
+      return;
+    }
+    selectedTrain.speed = Number(selectedTrainSpeedInput.value);
+    if (selectedTrainSpeedValue) {
+      selectedTrainSpeedValue.textContent = selectedTrain.speed.toFixed(1);
+    }
+  });
+
+  selectedTrainSpeedInput?.addEventListener("pointerdown", pushHistory);
+  selectedTrainSpeedInput?.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight" || event.key === "ArrowUp" || event.key === "ArrowDown") {
+      pushHistory();
+    }
+  });
+
+  selectedTrainSpeedInput?.addEventListener("change", () => {
+    scheduleUrlUpdate();
+  });
+
+  trainEnabledInput?.addEventListener("change", () => {
+    const selectedTrain = scenario.trains.find((trainRecord) => trainRecord.id === selectedTrainId);
+    if (!selectedTrain) {
+      return;
+    }
+    pushHistory();
+    selectedTrain.enabled = trainEnabledInput.checked;
     rebuildScenario();
     scheduleUrlUpdate();
   });
@@ -1054,8 +1875,11 @@ function wireInterface() {
     [conflictsToggle, "conflicts"],
     [blocksToggle, "blocks"],
     [pathsToggle, "paths"],
+    [connectionsToggle, "connections"],
+    [validationToggle, "validation"],
   ].forEach(([toggleElement, overlayName]) => {
     toggleElement?.addEventListener("change", () => {
+      pushHistory();
       appState.overlays[overlayName] = toggleElement.checked;
       scenario.view.overlays = { ...appState.overlays };
       updateOverlayVisibility();
@@ -1087,11 +1911,53 @@ function wireInterface() {
     if (event.button !== 0 || event.target !== renderer.domElement) {
       return;
     }
-    if (event.ctrlKey || event.metaKey || event.shiftKey) {
+    if (event.ctrlKey || event.metaKey) {
       return;
     }
     const groundPoint = pointerToGround(event);
+    if (event.shiftKey) {
+      selectNearestModule(groundPoint);
+      return;
+    }
     addScenarioObject(groundPoint);
+  });
+
+  renderer.domElement.addEventListener("pointermove", (event) => {
+    const groundPoint = pointerToGround(event);
+    updatePlacementPreview(groundPoint);
+  });
+
+  renderer.domElement.addEventListener("pointerleave", clearPlacementPreview);
+
+  window.addEventListener("keydown", (event) => {
+    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) {
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+      event.preventDefault();
+      undoAction();
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") {
+      event.preventDefault();
+      redoAction();
+      return;
+    }
+    if (event.key.toLowerCase() === "r") {
+      toolRotation = (toolRotation + Math.PI * 0.5) % (Math.PI * 2);
+      return;
+    }
+    if (event.key === "Delete") {
+      deleteSelected();
+      return;
+    }
+    if (event.key === "Escape") {
+      selectedModuleId = null;
+      selectedConflictId = null;
+      followingTrain = false;
+      followTrainButton?.classList.remove("is-active");
+      rebuildScenario();
+    }
   });
 
   orbitControls.addEventListener("start", () => {
@@ -1101,14 +1967,21 @@ function wireInterface() {
 
 function hydrateViewState() {
   appState.speed = scenario.view?.speed ?? appState.speed;
+  appState.snapEnabled = scenario.view?.snapEnabled ?? appState.snapEnabled;
   appState.overlays = {
     ...appState.overlays,
     ...(scenario.view?.overlays ?? {}),
   };
+  scenario.trains.forEach((trainRecord) => {
+    trainRecord.selectedRouteId = trainRecord.selectedRouteId ?? trainRecord.route ?? "main";
+  });
+  if (snapEnabledInput) snapEnabledInput.checked = appState.snapEnabled;
   if (labelsToggle) labelsToggle.checked = appState.overlays.labels;
   if (conflictsToggle) conflictsToggle.checked = appState.overlays.conflicts;
   if (blocksToggle) blocksToggle.checked = appState.overlays.blocks;
   if (pathsToggle) pathsToggle.checked = appState.overlays.paths;
+  if (connectionsToggle) connectionsToggle.checked = appState.overlays.connections;
+  if (validationToggle) validationToggle.checked = appState.overlays.validation;
   syncControls();
 }
 

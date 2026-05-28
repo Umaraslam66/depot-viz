@@ -42,6 +42,24 @@
         </section>
 
         <section class="panel-section">
+          <h2>Edit</h2>
+          <label class="check-row">
+            <input id="snap-enabled" type="checkbox" checked />
+            <span>Magnetic endpoint snap</span>
+          </label>
+          <div class="compact-row">
+            <button id="delete-selected" type="button">Delete selected</button>
+            <button id="duplicate-selected" type="button">Duplicate</button>
+          </div>
+          <div class="compact-row">
+            <button id="undo-action" type="button">Undo</button>
+            <button id="redo-action" type="button">Redo</button>
+          </div>
+          <button id="rebuild-routes" class="button-wide button-secondary" type="button">Rebuild routes</button>
+          <button id="reset-demo" class="button-wide button-secondary" type="button">Reset demo</button>
+        </section>
+
+        <section class="panel-section">
           <h2>Operations</h2>
           <div class="transport-row">
             <button id="play-pause" type="button">Pause</button>
@@ -59,6 +77,21 @@
           <h2>Selected Train</h2>
           <label class="field-label" for="train-name">Name</label>
           <input id="train-name" class="text-input" type="text" maxlength="24" value="IC-214" />
+          <label class="field-label field-label--spaced" for="train-route">Route</label>
+          <select id="train-route" class="text-input">
+            <option value="main">Main</option>
+            <option value="branch">Branch</option>
+            <option value="connected">Selected connected route</option>
+          </select>
+          <label class="slider-row slider-row--spaced" for="train-speed">
+            <span>Train speed</span>
+            <strong id="train-speed-value">7.20</strong>
+          </label>
+          <input id="train-speed" type="range" min="1" max="12" step="0.1" value="7.2" />
+          <label class="check-row">
+            <input id="train-enabled" type="checkbox" checked />
+            <span>Train enabled</span>
+          </label>
           <div class="compact-row">
             <button id="rename-train" type="button">Rename</button>
             <button id="next-train" type="button">Next train</button>
@@ -82,6 +115,14 @@
           <label class="check-row">
             <input id="overlay-paths" type="checkbox" checked />
             <span>Train paths</span>
+          </label>
+          <label class="check-row">
+            <input id="overlay-connections" type="checkbox" checked />
+            <span>Connections</span>
+          </label>
+          <label class="check-row">
+            <input id="overlay-validation" type="checkbox" checked />
+            <span>Validation</span>
           </label>
         </section>
 
