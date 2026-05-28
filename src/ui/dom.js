@@ -81,5 +81,8 @@ export function getDomRefs() {
     playbackSpeedValue: document.querySelector("#playback-speed-value"),
     playbackResetInput: document.querySelector("#playback-reset"),
     exportPlaybackButton: document.querySelector("#export-playback"),
+    renderQualitySelect: document.querySelector("#render-quality"),
+    inspectorTabButtons: [...document.querySelectorAll("[data-inspector-tab]")],
+    inspectorPanels: [...document.querySelectorAll("[data-inspector-panel]")],
   };
 }

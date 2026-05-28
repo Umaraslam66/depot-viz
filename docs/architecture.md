@@ -9,7 +9,7 @@ Rail Scenario Planner is a static Three.js application. The browser loads `index
 3. `src/state/scenarioStore.js` restores a scenario from the URL first, then browser autosave, then the built-in demo.
 4. `src/main.js` creates the WebGL renderer, scene, camera, controls, groups, app state, and event handlers.
 5. Scene rebuilds convert scenario records into Three.js objects with stable `userData.objectType` and `userData.objectId` values for raycast selection.
-6. The animation loop advances train positions, conflict pulses, camera motion, URL updates, autosave, and rendering.
+6. The render loop runs on demand, staying active during playback, recording, camera moves, dragging, URL updates, and autosave.
 
 ## State Model
 
@@ -35,7 +35,7 @@ The scene is organized into groups:
 - `labelGroup`: sprite labels.
 - `previewGroup`: placement feedback.
 
-Track modules are rebuilt from records whenever the scenario changes. Trains are animated each frame along either built-in fallback curves or a connected route generated from module connections.
+Track modules are rebuilt from records whenever the scenario changes. Trains are animated along either built-in fallback curves or a connected route generated from module connections. When playback is stopped, the canvas renders only after an interaction or state change.
 
 ## Interaction Model
 

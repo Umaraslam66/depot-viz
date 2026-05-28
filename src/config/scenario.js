@@ -116,6 +116,7 @@ export const defaultScenario = {
   view: {
     preset: "overview",
     speed: 1,
+    quality: "balanced",
     snapEnabled: true,
     presentationMode: false,
     overlays: {

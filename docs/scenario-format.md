@@ -91,6 +91,7 @@ Planner view and overlay state.
 
 - `preset`: active camera preset.
 - `speed`: timeline speed.
+- `quality`: render quality, one of `performance`, `balanced`, or `high`.
 - `snapEnabled`: magnetic snapping toggle.
 - `presentationMode`: presentation mode toggle.
 - `overlays`: booleans for labels, conflicts, blocks, paths, connections, and validation.

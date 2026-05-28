@@ -103,6 +103,9 @@ const {
   playbackSpeedValue,
   playbackResetInput,
   exportPlaybackButton,
+  renderQualitySelect,
+  inspectorTabButtons,
+  inspectorPanels,
 } = getDomRefs();
 
 let renderer;
@@ -123,7 +126,7 @@ try {
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1;
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 renderer.setSize(window.innerWidth, window.innerHeight);
 
 const scene = new THREE.Scene();
@@ -177,6 +180,7 @@ const labelObjects = new Map();
 const conflictObjects = new Map();
 const pathCurves = new Map();
 const connectedRoutes = new Map();
+const routeLengths = new Map();
 const clock = new THREE.Clock();
 const scratchVector = new THREE.Vector3();
 const scratchLookAt = new THREE.Vector3();
@@ -197,17 +201,26 @@ let restoredFromBrowser = false;
 let recordingPlayback = false;
 let currentPlacementPreview = null;
 let dragState = null;
+let orbitInteractionActive = false;
 let titleCardSprite = null;
+let animationFrameId = 0;
+let renderRequested = false;
+let isRenderingFrame = false;
+let lastValidationWarnings = [];
+let titleCardCacheKey = "";
+let textTextureThemeKey = "";
 const undoStack = [];
 const redoStack = [];
+const textTextureCache = new Map();
 const maxHistoryEntries = 40;
 const snapTolerance = 3.1;
 const placementOverlapTolerance = 2.8;
 
 const appState = {
-  running: true,
+  running: false,
   time: 0,
   speed: Number(speedInput?.value ?? 1),
+  quality: "balanced",
   snapEnabled: true,
   presentationMode: false,
   saveState: "saved",
@@ -240,6 +253,7 @@ function encodeScenario() {
 function scheduleUrlUpdate() {
   urlUpdateTimer = 0.8;
   scheduleAutosave();
+  requestRender();
 }
 
 function commitScenarioToUrl() {
@@ -251,6 +265,7 @@ function commitScenarioToUrl() {
 function scheduleAutosave() {
   autosaveTimer = 0.7;
   setSaveState("unsaved", "Unsaved");
+  requestRender();
 }
 
 function saveScenarioToBrowser(statusText = "Saved") {
@@ -285,6 +300,7 @@ function buildSerializableScenario() {
     view: {
       preset: scenario.view.preset,
       speed: appState.speed,
+      quality: appState.quality,
       snapEnabled: appState.snapEnabled,
       presentationMode: appState.presentationMode,
       overlays: appState.overlays,
@@ -301,6 +317,48 @@ function setSaveState(stateName, labelText) {
   saveStatus.classList.toggle("is-unsaved", stateName === "unsaved");
   saveStatus.classList.toggle("is-recording", stateName === "recording");
   saveStatus.classList.toggle("is-error", stateName === "error");
+  requestRender();
+}
+
+function requestRender() {
+  renderRequested = true;
+  if (isRenderingFrame) {
+    return;
+  }
+  if (!animationFrameId) {
+    animationFrameId = requestAnimationFrame(animate);
+  }
+}
+
+function shouldContinueRendering() {
+  return (
+    appState.running ||
+    recordingPlayback ||
+    cameraPresetActive ||
+    Boolean(dragState) ||
+    orbitInteractionActive ||
+    urlUpdateTimer > 0 ||
+    autosaveTimer > 0
+  );
+}
+
+function qualityToPixelRatio(qualityName) {
+  if (qualityName === "performance") {
+    return 1;
+  }
+  if (qualityName === "high") {
+    return 2;
+  }
+  return 1.5;
+}
+
+function applyRendererQuality() {
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, qualityToPixelRatio(appState.quality)));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  if (renderQualitySelect) {
+    renderQualitySelect.value = appState.quality;
+  }
+  requestRender();
 }
 
 function captureEditorState() {
@@ -313,6 +371,7 @@ function captureEditorState() {
       running: appState.running,
       time: appState.time,
       speed: appState.speed,
+      quality: appState.quality,
       snapEnabled: appState.snapEnabled,
       presentationMode: appState.presentationMode,
       overlays: { ...appState.overlays },
@@ -330,12 +389,14 @@ function restoreEditorState(editorState) {
   appState.running = editorState.appState.running;
   appState.time = editorState.appState.time;
   appState.speed = editorState.appState.speed;
+  appState.quality = editorState.appState.quality ?? "balanced";
   appState.snapEnabled = editorState.appState.snapEnabled;
   appState.presentationMode = editorState.appState.presentationMode;
   appState.overlays = { ...editorState.appState.overlays };
   activeTool = editorState.activeTool;
   toolRotation = editorState.toolRotation;
   hydrateViewState();
+  applySceneTheme();
   selectTool(activeTool);
   rebuildScenario();
   updateSelectedTrain();
@@ -469,6 +530,11 @@ function applyThemePreset(presetName) {
 
 function applySceneTheme() {
   const colorConfig = scenario.meta.colors;
+  const nextTextureThemeKey = `${colorConfig.label}|${colorConfig.accent}|${colorConfig.conflict}`;
+  if (nextTextureThemeKey !== textTextureThemeKey) {
+    clearTextTextureCache();
+    textTextureThemeKey = nextTextureThemeKey;
+  }
   document.documentElement.style.setProperty("--accent", colorConfig.accent);
   document.documentElement.style.setProperty("--accent-dark", colorConfig.accent);
   materials.path.color.set(colorConfig.path);
@@ -482,6 +548,7 @@ function applySceneTheme() {
   if (overlaySubtitle) overlaySubtitle.textContent = scenario.meta.subtitle;
   document.title = scenario.meta.title;
   refreshTitleCard();
+  requestRender();
 }
 
 function updateExportSettingsFromControls() {
@@ -514,6 +581,7 @@ function importScenarioJson(fileValue) {
       selectedConflictId = null;
       appState.time = 0;
       hydrateViewState();
+      applySceneTheme();
       rebuildScenario();
       setCameraPreset(scenario.view?.preset ?? "overview");
       saveScenarioToBrowser("Imported");
@@ -620,7 +688,31 @@ async function exportPlaybackWebm() {
   setSaveState("saved", "Saved");
 }
 
+function markDisposableMaterial(materialValue, options = {}) {
+  materialValue.userData.disposable = true;
+  materialValue.userData.keepMap = Boolean(options.keepMap);
+  return materialValue;
+}
+
+function clearTextTextureCache() {
+  textTextureCache.forEach((textureValue) => textureValue.dispose());
+  textTextureCache.clear();
+}
+
 function createTextTexture(textValue, options = {}) {
+  const cacheKey = JSON.stringify({
+    text: textValue,
+    width: options.width ?? 512,
+    height: options.height ?? 160,
+    background: options.background ?? "rgba(255, 255, 255, 0.94)",
+    border: options.border ?? "rgba(148, 163, 184, 0.75)",
+    color: options.color ?? scenario.meta?.colors?.label ?? "#111827",
+    fontSize: options.fontSize ?? 46,
+  });
+  const cachedTexture = textTextureCache.get(cacheKey);
+  if (cachedTexture) {
+    return cachedTexture;
+  }
   const canvas = document.createElement("canvas");
   const width = options.width ?? 512;
   const height = options.height ?? 160;
@@ -644,6 +736,7 @@ function createTextTexture(textValue, options = {}) {
   context.fillText(textValue, width * 0.5, height * 0.52, width - 42);
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
+  textTextureCache.set(cacheKey, texture);
   return texture;
 }
 
@@ -658,11 +751,11 @@ function roundRect(context, xValue, yValue, widthValue, heightValue, radiusValue
 }
 
 function createLabelSprite(textValue, positionValue, options = {}) {
-  const spriteMaterial = new THREE.SpriteMaterial({
+  const spriteMaterial = markDisposableMaterial(new THREE.SpriteMaterial({
     map: createTextTexture(textValue, options),
     transparent: true,
     depthTest: false,
-  });
+  }), { keepMap: true });
   const sprite = new THREE.Sprite(spriteMaterial);
   sprite.position.copy(positionValue);
   sprite.scale.set(options.scaleX ?? 5.2, options.scaleY ?? 1.28, 1);
@@ -699,28 +792,55 @@ function createTitleCardTexture() {
 }
 
 function refreshTitleCard() {
+  const nextTitleCardKey = JSON.stringify({
+    title: scenario.meta.title,
+    subtitle: scenario.meta.subtitle,
+    author: scenario.meta.author,
+    accent: scenario.meta.colors.accent,
+    label: scenario.meta.colors.label,
+    visible: appState.presentationMode || recordingPlayback,
+  });
   if (!titleCardSprite) {
-    titleCardSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+    titleCardSprite = new THREE.Sprite(markDisposableMaterial(new THREE.SpriteMaterial({
       map: createTitleCardTexture(),
       transparent: true,
       depthTest: false,
       depthWrite: false,
-    }));
+    })));
     titleCardSprite.position.set(0, 2.35, -7.2);
     titleCardSprite.scale.set(5.8, 1.45, 1);
     camera.add(titleCardSprite);
-  } else {
+  } else if (nextTitleCardKey !== titleCardCacheKey) {
     titleCardSprite.material.map?.dispose();
     titleCardSprite.material.map = createTitleCardTexture();
     titleCardSprite.material.needsUpdate = true;
   }
   titleCardSprite.visible = appState.presentationMode || recordingPlayback;
+  titleCardCacheKey = nextTitleCardKey;
 }
 
 function clearGroup(groupValue) {
   while (groupValue.children.length > 0) {
-    groupValue.remove(groupValue.children[groupValue.children.length - 1]);
+    const childObject = groupValue.children[groupValue.children.length - 1];
+    groupValue.remove(childObject);
+    disposeObject(childObject);
   }
+}
+
+function disposeObject(objectValue) {
+  objectValue.traverse((childObject) => {
+    childObject.geometry?.dispose?.();
+    const materialList = Array.isArray(childObject.material) ? childObject.material : [childObject.material];
+    materialList.filter(Boolean).forEach((materialValue) => {
+      if (!materialValue.userData?.disposable) {
+        return;
+      }
+      if (!materialValue.userData.keepMap) {
+        materialValue.map?.dispose?.();
+      }
+      materialValue.dispose?.();
+    });
+  });
 }
 
 function addBox(targetGroup, dimensions, position, material) {
@@ -748,7 +868,7 @@ function addCurveRails(targetGroup, radiusValue, angleValue) {
     const curve = new THREE.EllipseCurve(0, 0, radiusValue + offsetValue, radiusValue + offsetValue, 0, angleValue, false, 0);
     const points = curve.getPoints(48).map((pointValue) => new THREE.Vector3(pointValue.x, 0.2, pointValue.y));
     const geometry = new THREE.BufferGeometry().setFromPoints(points);
-    const railLine = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: railMaterial.color }));
+    const railLine = new THREE.Line(geometry, markDisposableMaterial(new THREE.LineBasicMaterial({ color: railMaterial.color })));
     targetGroup.add(railLine);
   });
 
@@ -932,20 +1052,20 @@ function createConflictObject(conflictRecord) {
   conflictGroup.userData.overlayType = "conflicts";
   const isHighSeverity = conflictRecord.severity === "high";
   const colorValue = isHighSeverity ? new THREE.Color(scenario.meta.colors.conflict) : new THREE.Color(colors.conflictLow);
-  const ringMaterial = new THREE.MeshBasicMaterial({
+  const ringMaterial = markDisposableMaterial(new THREE.MeshBasicMaterial({
     color: colorValue,
     transparent: true,
     opacity: 0.72,
     depthWrite: false,
     side: THREE.DoubleSide,
-  });
-  const fillMaterial = new THREE.MeshBasicMaterial({
+  }));
+  const fillMaterial = markDisposableMaterial(new THREE.MeshBasicMaterial({
     color: colorValue,
     transparent: true,
     opacity: 0.12,
     depthWrite: false,
     side: THREE.DoubleSide,
-  });
+  }));
   const ringMesh = new THREE.Mesh(new THREE.RingGeometry(1.65, 2.0, 48), ringMaterial);
   ringMesh.rotation.x = -Math.PI * 0.5;
   ringMesh.position.y = 0.14;
@@ -1080,6 +1200,16 @@ function getRouteCurve(routeName) {
   return routeCurve;
 }
 
+function getRouteLength(routeName) {
+  if (routeLengths.has(routeName)) {
+    return routeLengths.get(routeName);
+  }
+  const routeCurve = getRouteCurve(routeName);
+  const lengthValue = routeCurve?.getLength() ?? 1;
+  routeLengths.set(routeName, lengthValue);
+  return lengthValue;
+}
+
 function createPathOverlay(routeName) {
   const routeCurve = getRouteCurve(routeName);
   if (!routeCurve) {
@@ -1111,18 +1241,18 @@ function findClosestRouteRatio(routeName, worldPoint) {
 
 function createTrainObject(trainRecord) {
   const group = new THREE.Group();
-  const bodyMaterial = new THREE.MeshStandardMaterial({
+  const bodyMaterial = markDisposableMaterial(new THREE.MeshStandardMaterial({
     color: new THREE.Color(trainRecord.color),
     roughness: 0.5,
     metalness: 0.05,
-  });
-  const roofMaterial = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.46, metalness: 0.04 });
-  const windowMaterial = new THREE.MeshStandardMaterial({
+  }));
+  const roofMaterial = markDisposableMaterial(new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.46, metalness: 0.04 }));
+  const windowMaterial = markDisposableMaterial(new THREE.MeshStandardMaterial({
     color: 0x0f172a,
     emissive: 0x1e3a8a,
     emissiveIntensity: 0.16,
     roughness: 0.3,
-  });
+  }));
 
   addBox(group, [2.35, 0.72, 0.92], [0, 0.68, 0], bodyMaterial);
   addBox(group, [2.0, 0.16, 0.78], [0, 1.12, 0], roofMaterial);
@@ -1142,13 +1272,13 @@ function createTrainObject(trainRecord) {
     });
   });
 
-  const haloMaterial = new THREE.MeshBasicMaterial({
+  const haloMaterial = markDisposableMaterial(new THREE.MeshBasicMaterial({
     color: selectedTrainId === trainRecord.id ? colors.selection : new THREE.Color(trainRecord.color),
     transparent: true,
     opacity: selectedTrainId === trainRecord.id ? 0.32 : 0.14,
     depthWrite: false,
     side: THREE.DoubleSide,
-  });
+  }));
   const halo = new THREE.Mesh(new THREE.CircleGeometry(1.65, 40), haloMaterial);
   halo.rotation.x = -Math.PI * 0.5;
   halo.position.y = 0.04;
@@ -1171,6 +1301,7 @@ function updateOverlayVisibility() {
   conflictObjects.forEach((conflictObject) => {
     conflictObject.visible = appState.overlays.conflicts;
   });
+  requestRender();
 }
 
 function updateSelectedTrain() {
@@ -1266,10 +1397,9 @@ function updatePropertiesPanel() {
   }
 }
 
-function updateReadout() {
+function updateReadout(validationWarnings = lastValidationWarnings) {
   const activeConflicts = scenario.conflicts.filter((conflictRecord) => conflictRecord.active);
   const enabledTrains = scenario.trains.filter((trainRecord) => trainRecord.enabled);
-  const validationWarnings = validateScenario();
   if (kpiTrains) {
     kpiTrains.textContent = String(enabledTrains.length);
   }
@@ -1322,6 +1452,7 @@ function setCameraPreset(presetName) {
   });
   followTrainButton?.classList.remove("is-active");
   scheduleUrlUpdate();
+  requestRender();
 }
 
 function snapToGrid(value) {
@@ -1383,6 +1514,9 @@ function setSelectedObject(selectionValue) {
   selectedConflictId = selectionValue?.type === "conflict" ? selectionValue.id : null;
   if (selectionValue?.type === "train") {
     selectedTrainId = selectionValue.id;
+  }
+  if (selectionValue) {
+    setInspectorTab("selection");
   }
   rebuildScenario();
 }
@@ -1540,18 +1674,19 @@ function moveSelectedObjectToGround(positionValue) {
     if (moduleIndex < 0) {
       return;
     }
-    removeConnectionsForModule(dragState.id);
+    if (!dragState.connectionsRemoved) {
+      removeConnectionsForModule(dragState.id);
+      dragState.connectionsRemoved = true;
+    }
     const movePlan = getModuleMovePlan(scenario.trackModules[moduleIndex], positionValue);
     scenario.trackModules[moduleIndex] = movePlan.moduleRecord;
-    if (movePlan.connection) {
-      scenario.connections.push({
-        fromModuleId: movePlan.connection.target.moduleId,
-        fromPortId: movePlan.connection.target.id,
-        toModuleId: dragState.id,
-        toPortId: movePlan.connection.sourcePortId,
-      });
+    dragState.pendingConnection = movePlan.connection ?? null;
+    const moduleObject = moduleObjects.get(dragState.id);
+    if (moduleObject) {
+      moduleObject.position.set(movePlan.moduleRecord.position[0], movePlan.moduleRecord.position[1], movePlan.moduleRecord.position[2]);
+      moduleObject.rotation.y = movePlan.moduleRecord.rotation ?? 0;
     }
-    rebuildScenario();
+    requestRender();
     return;
   }
 
@@ -1564,7 +1699,11 @@ function moveSelectedObjectToGround(positionValue) {
     conflictRecord.position = nearestTrackPoint
       ? [nearestTrackPoint.position.x, 0, nearestTrackPoint.position.z]
       : [snapToGrid(positionValue.x), 0, snapToGrid(positionValue.z)];
-    rebuildScenario();
+    const conflictObject = conflictObjects.get(dragState.id);
+    if (conflictObject) {
+      conflictObject.position.set(conflictRecord.position[0], 0, conflictRecord.position[2]);
+    }
+    requestRender();
   }
 }
 
@@ -1588,11 +1727,13 @@ function updatePlacementPreview(positionValue) {
     targetMarker.position.y += 0.25;
     previewGroup.add(targetMarker);
   }
+  requestRender();
 }
 
 function clearPlacementPreview() {
   currentPlacementPreview = null;
   clearGroup(previewGroup);
+  requestRender();
 }
 
 function removeConnectionsForModule(moduleId) {
@@ -1740,6 +1881,7 @@ function resetDemo() {
   selectedConflictId = null;
   appState.time = 0;
   hydrateViewState();
+  applySceneTheme();
   rebuildScenario();
   setCameraPreset("overview");
   scheduleUrlUpdate();
@@ -1774,7 +1916,7 @@ function selectNearestModule(worldPoint) {
 }
 
 function createOccupancyBand(trainRecord, positionValue, tangentValue) {
-  const bandMaterial = materials.occupied.clone();
+  const bandMaterial = markDisposableMaterial(materials.occupied.clone());
   const bandMesh = new THREE.Mesh(new THREE.PlaneGeometry(5.2, 2.3), bandMaterial);
   bandMesh.rotation.x = -Math.PI * 0.5;
   bandMesh.position.copy(positionValue);
@@ -1809,7 +1951,7 @@ function createConnectionOverlays() {
     getWorldPorts(moduleRecord).forEach((portRecord) => {
       const portMaterial = isPortConnected(moduleRecord.id, portRecord.id)
         ? materials.connection
-        : materials.connection.clone();
+        : markDisposableMaterial(materials.connection.clone());
       if (!isPortConnected(moduleRecord.id, portRecord.id)) {
         portMaterial.opacity = 0.34;
       }
@@ -1832,11 +1974,11 @@ function createConnectionOverlays() {
       return;
     }
     const lineGeometry = new THREE.BufferGeometry().setFromPoints([fromPort.position, toPort.position]);
-    const lineMesh = new THREE.Line(lineGeometry, new THREE.LineBasicMaterial({
+    const lineMesh = new THREE.Line(lineGeometry, markDisposableMaterial(new THREE.LineBasicMaterial({
       color: colors.connection,
       transparent: true,
       opacity: 0.66,
-    }));
+    })));
     lineMesh.userData.overlayType = "connections";
     overlayGroup.add(lineMesh);
   });
@@ -1929,6 +2071,7 @@ function rebuildScenario() {
   labelObjects.clear();
   conflictObjects.clear();
   pathCurves.clear();
+  routeLengths.clear();
   clearGroup(scenarioGroup);
   clearGroup(trainGroup);
   clearGroup(labelGroup);
@@ -1976,11 +2119,13 @@ function rebuildScenario() {
   });
 
   createConnectionOverlays();
-  createValidationOverlays(validateScenario());
+  lastValidationWarnings = validateScenario();
+  createValidationOverlays(lastValidationWarnings);
   rebuildOccupancyBands();
   updateTrainNameInput();
-  updateReadout();
+  updateReadout(lastValidationWarnings);
   updateOverlayVisibility();
+  requestRender();
 }
 
 function updateTrainPositions(deltaTime) {
@@ -1999,7 +2144,7 @@ function updateTrainPositions(deltaTime) {
       trainObject.visible = true;
       return;
     }
-    const routeLength = routeCurve.getLength();
+    const routeLength = getRouteLength(trainRecord.selectedRouteId ?? trainRecord.route);
     const ratio = ((trainRecord.startOffset + (appState.time * trainRecord.speed) / routeLength) % 1 + 1) % 1;
     const positionValue = routeCurve.getPointAt(ratio);
     const tangentValue = routeCurve.getTangentAt(ratio).normalize();
@@ -2076,26 +2221,30 @@ function syncControls() {
     speedInput.value = String(appState.speed);
   }
   if (runStatus) {
-    runStatus.textContent = appState.running ? "Running" : "Paused";
+    runStatus.textContent = appState.running ? "Running" : "Stopped";
+    runStatus.closest(".status-pill")?.classList.toggle("is-running", appState.running);
   }
   if (playPauseButton) {
     playPauseButton.textContent = appState.running ? "Pause" : "Play";
+    playPauseButton.classList.toggle("primary-command", !appState.running);
   }
   if (snapEnabledInput) {
     snapEnabledInput.checked = appState.snapEnabled;
+  }
+  if (renderQualitySelect) {
+    renderQualitySelect.value = appState.quality;
   }
   document.body.classList.toggle("is-presenting", appState.presentationMode);
   if (titleOverlay) {
     titleOverlay.hidden = !appState.presentationMode && !recordingPlayback;
   }
   if (presentationModeButton) {
-    presentationModeButton.textContent = appState.presentationMode ? "Exit presentation" : "Presentation mode";
+    presentationModeButton.textContent = appState.presentationMode ? "Exit" : "Present";
     presentationModeButton.classList.toggle("is-active", appState.presentationMode);
   }
+  refreshTitleCard();
   syncHistoryControls();
-  applySceneTheme();
-  syncProjectControls();
-  updateTrainNameInput();
+  requestRender();
 }
 
 function selectTool(toolName) {
@@ -2103,9 +2252,26 @@ function selectTool(toolName) {
   toolButtons.forEach((buttonElement) => {
     buttonElement.classList.toggle("is-active", buttonElement.dataset.tool === toolName);
   });
+  requestRender();
+}
+
+function setInspectorTab(tabName) {
+  inspectorTabButtons.forEach((buttonElement) => {
+    buttonElement.classList.toggle("is-active", buttonElement.dataset.inspectorTab === tabName);
+  });
+  inspectorPanels.forEach((panelElement) => {
+    const isActive = panelElement.dataset.inspectorPanel === tabName;
+    panelElement.classList.toggle("is-active", isActive);
+    panelElement.hidden = !isActive;
+  });
+  requestRender();
 }
 
 function wireInterface() {
+  inspectorTabButtons.forEach((buttonElement) => {
+    buttonElement.addEventListener("click", () => setInspectorTab(buttonElement.dataset.inspectorTab));
+  });
+
   toolButtons.forEach((buttonElement) => {
     buttonElement.addEventListener("click", () => selectTool(buttonElement.dataset.tool));
   });
@@ -2119,6 +2285,14 @@ function wireInterface() {
     appState.snapEnabled = snapEnabledInput.checked;
     scenario.view.snapEnabled = appState.snapEnabled;
     syncControls();
+    scheduleUrlUpdate();
+  });
+
+  renderQualitySelect?.addEventListener("change", () => {
+    pushHistory();
+    appState.quality = renderQualitySelect.value;
+    scenario.view.quality = appState.quality;
+    applyRendererQuality();
     scheduleUrlUpdate();
   });
 
@@ -2266,6 +2440,7 @@ function wireInterface() {
     followingTrain = !followingTrain;
     cameraPresetActive = false;
     followTrainButton.classList.toggle("is-active", followingTrain);
+    requestRender();
   });
 
   speedInput?.addEventListener("input", () => {
@@ -2424,12 +2599,12 @@ function wireInterface() {
       await navigator.clipboard.writeText(window.location.href);
       shareButton.textContent = "Share URL copied";
       window.setTimeout(() => {
-        shareButton.textContent = "Copy share URL";
+        shareButton.textContent = "Copy URL";
       }, 1600);
     } catch {
       shareButton.textContent = "URL updated";
       window.setTimeout(() => {
-        shareButton.textContent = "Copy share URL";
+        shareButton.textContent = "Copy URL";
       }, 1600);
     }
   });
@@ -2476,6 +2651,15 @@ function wireInterface() {
     if (!dragState) {
       return;
     }
+    const completedDrag = dragState;
+    if (completedDrag.type === "module" && completedDrag.pendingConnection) {
+      scenario.connections.push({
+        fromModuleId: completedDrag.pendingConnection.target.moduleId,
+        fromPortId: completedDrag.pendingConnection.target.id,
+        toModuleId: completedDrag.id,
+        toPortId: completedDrag.pendingConnection.sourcePortId,
+      });
+    }
     dragState = null;
     orbitControls.enabled = true;
     try {
@@ -2483,7 +2667,12 @@ function wireInterface() {
     } catch {
       // Pointer capture may already be released if the browser cancels the gesture.
     }
-    scheduleUrlUpdate();
+    if (completedDrag.historyCaptured) {
+      rebuildScenario();
+      scheduleUrlUpdate();
+    } else {
+      requestRender();
+    }
   });
 
   renderer.domElement.addEventListener("pointerleave", clearPlacementPreview);
@@ -2521,13 +2710,24 @@ function wireInterface() {
 
   orbitControls.addEventListener("start", () => {
     cameraPresetActive = false;
+    orbitInteractionActive = true;
+    requestRender();
+  });
+  orbitControls.addEventListener("end", () => {
+    orbitInteractionActive = false;
+    requestRender();
+  });
+  orbitControls.addEventListener("change", () => {
+    requestRender();
   });
 }
 
 function hydrateViewState() {
   appState.speed = scenario.view?.speed ?? appState.speed;
+  appState.quality = scenario.view?.quality ?? appState.quality;
   appState.snapEnabled = scenario.view?.snapEnabled ?? appState.snapEnabled;
   appState.presentationMode = scenario.view?.presentationMode ?? appState.presentationMode;
+  appState.running = false;
   appState.overlays = {
     ...appState.overlays,
     ...(scenario.view?.overlays ?? {}),
@@ -2542,10 +2742,15 @@ function hydrateViewState() {
   if (pathsToggle) pathsToggle.checked = appState.overlays.paths;
   if (connectionsToggle) connectionsToggle.checked = appState.overlays.connections;
   if (validationToggle) validationToggle.checked = appState.overlays.validation;
+  if (renderQualitySelect) renderQualitySelect.value = appState.quality;
+  applyRendererQuality();
+  syncProjectControls();
   syncControls();
 }
 
 function animate() {
+  animationFrameId = 0;
+  isRenderingFrame = true;
   const deltaTime = Math.min(clock.getDelta(), 0.05);
   const elapsedTime = clock.elapsedTime;
   updateTrainPositions(deltaTime);
@@ -2563,20 +2768,24 @@ function animate() {
       saveScenarioToBrowser();
     }
   }
+  renderRequested = false;
   renderer.render(scene, camera);
-  requestAnimationFrame(animate);
+  isRenderingFrame = false;
+  if (shouldContinueRendering()) {
+    animationFrameId = requestAnimationFrame(animate);
+  }
 }
 
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.fov = window.innerWidth <= 760 ? 50 : 42;
   camera.updateProjectionMatrix();
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.setSize(window.innerWidth, window.innerHeight);
+  applyRendererQuality();
 });
 
 createGround();
 hydrateViewState();
+applySceneTheme();
 wireInterface();
 rebuildScenario();
 setCameraPreset(scenario.view?.preset ?? "overview");
@@ -2586,4 +2795,4 @@ if (restoredFromBrowser) {
 } else {
   setSaveState("saved", "Saved");
 }
-animate();
+requestRender();

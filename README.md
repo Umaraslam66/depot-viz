@@ -41,6 +41,7 @@ Opening `index.html` directly is not recommended because ES modules and browser 
 - Validation panel for disconnected ports, overlaps, incomplete connected routes, disabled trains, and incomplete conflict scopes.
 - Presentation mode with title/subtitle/author metadata, configurable themes, PNG export, and WEBM playback export when supported by the browser.
 - URL sharing, JSON import/export, and local browser autosave.
+- Render quality control and paused-by-default playback for better performance during workshops.
 
 ## Project Structure
 
