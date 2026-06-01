@@ -18,7 +18,13 @@ import {
   normalizeRotation,
   worldPosition,
 } from "./scene/trackGeometry.js";
+import { createCanvasGestureController } from "./utils/gestureController.js";
 import { createSpacePanController } from "./utils/interactionModes.js";
+import {
+  buildConnectedRouteModuleIds,
+  countActionableWarnings,
+  isActionableValidationWarning,
+} from "./utils/railGraph.js";
 import { cloneJson } from "./utils/serialization.js";
 import { getDomRefs } from "./ui/dom.js";
 
@@ -193,10 +199,11 @@ const orientationHelper = new THREE.Object3D();
 let cameraPresetActive = false;
 let desiredCameraPosition = camera.position.clone();
 let desiredCameraTarget = orbitControls.target.clone();
+let activeTrainId = null;
 let selectedTrainId = null;
 let selectedModuleId = null;
 let selectedConflictId = null;
-let activeTool = "straight";
+let activeTool = "select";
 let toolRotation = 0;
 let followingTrain = false;
 let urlUpdateTimer = 0;
@@ -205,6 +212,8 @@ let restoredFromBrowser = false;
 let recordingPlayback = false;
 let currentPlacementPreview = null;
 let dragState = null;
+let capturedPointerId = null;
+let moduleRotationHistoryCaptured = false;
 let orbitInteractionActive = false;
 let titleCardSprite = null;
 let animationFrameId = 0;
@@ -230,6 +239,7 @@ const spacePanController = createSpacePanController({
     requestRender();
   },
 });
+const canvasGestureController = createCanvasGestureController({ movementThreshold: 6 });
 
 const appState = {
   running: false,
@@ -253,7 +263,7 @@ const urlScenario = readScenarioFromUrl(window, defaultScenario);
 const browserScenario = urlScenario ? null : readScenarioFromBrowser(window, browserSaveKey, defaultScenario);
 restoredFromBrowser = Boolean(browserScenario);
 let scenario = normalizeScenario(urlScenario ?? browserScenario ?? cloneJson(defaultScenario));
-selectedTrainId = scenario.trains.find((trainRecord) => trainRecord.enabled)?.id ?? scenario.trains[0]?.id ?? null;
+activeTrainId = scenario.trains.find((trainRecord) => trainRecord.enabled)?.id ?? scenario.trains[0]?.id ?? null;
 
 const cameraPresets = createCameraPresets(THREE);
 
@@ -379,6 +389,7 @@ function applyRendererQuality() {
 function captureEditorState() {
   return {
     scenario: cloneJson(scenario),
+    activeTrainId,
     selectedTrainId,
     selectedModuleId,
     selectedConflictId,
@@ -398,6 +409,7 @@ function captureEditorState() {
 
 function restoreEditorState(editorState) {
   scenario = cloneJson(editorState.scenario);
+  activeTrainId = editorState.activeTrainId ?? editorState.selectedTrainId ?? null;
   selectedTrainId = editorState.selectedTrainId;
   selectedModuleId = editorState.selectedModuleId;
   selectedConflictId = editorState.selectedConflictId;
@@ -556,7 +568,7 @@ function applySceneTheme() {
   materials.signalRed.color.set(colorConfig.conflict);
   materials.signalRed.emissive.set(colorConfig.conflict);
   if (titleOverlay) {
-    titleOverlay.style.borderLeftColor = "var(--ui-accent)";
+    titleOverlay.style.borderLeftColor = "var(--accent)";
   }
   if (overlayAuthor) overlayAuthor.textContent = scenario.meta.author;
   if (overlayTitle) overlayTitle.textContent = scenario.meta.title;
@@ -591,7 +603,8 @@ function importScenarioJson(fileValue) {
       }
       pushHistory();
       scenario = normalizeScenario(parsedScenario);
-      selectedTrainId = scenario.trains.find((trainRecord) => trainRecord.enabled)?.id ?? scenario.trains[0]?.id ?? null;
+      activeTrainId = scenario.trains.find((trainRecord) => trainRecord.enabled)?.id ?? scenario.trains[0]?.id ?? null;
+      selectedTrainId = null;
       selectedModuleId = null;
       selectedConflictId = null;
       appState.time = 0;
@@ -1143,47 +1156,11 @@ function getModuleById(moduleId) {
   return scenario.trackModules.find((moduleRecord) => moduleRecord.id === moduleId);
 }
 
-function getConnectionNeighbors(moduleId) {
-  return scenario.connections
-    .map((connectionRecord) => {
-      if (connectionRecord.fromModuleId === moduleId) {
-        return connectionRecord.toModuleId;
-      }
-      if (connectionRecord.toModuleId === moduleId) {
-        return connectionRecord.fromModuleId;
-      }
-      return null;
-    })
-    .filter(Boolean);
-}
-
 function rebuildRoutesFromConnections() {
   connectedRoutes.clear();
-  if (scenario.connections.length === 0) {
+  const orderedModuleIds = buildConnectedRouteModuleIds(scenario.trackModules, scenario.connections);
+  if (!orderedModuleIds) {
     return;
-  }
-
-  const connectedModuleIds = [...new Set(scenario.connections.flatMap((connectionRecord) => [
-    connectionRecord.fromModuleId,
-    connectionRecord.toModuleId,
-  ]))].filter((moduleId) => getModuleById(moduleId));
-  if (connectedModuleIds.length < 2) {
-    return;
-  }
-
-  const endpointModuleId =
-    connectedModuleIds.find((moduleId) => getConnectionNeighbors(moduleId).length === 1) ?? connectedModuleIds[0];
-  const orderedModuleIds = [];
-  const visitedModuleIds = new Set();
-  let currentModuleId = endpointModuleId;
-  let previousModuleId = null;
-
-  while (currentModuleId && !visitedModuleIds.has(currentModuleId)) {
-    orderedModuleIds.push(currentModuleId);
-    visitedModuleIds.add(currentModuleId);
-    const nextModuleId = getConnectionNeighbors(currentModuleId).find((moduleId) => moduleId !== previousModuleId);
-    previousModuleId = currentModuleId;
-    currentModuleId = nextModuleId;
   }
 
   const routePoints = orderedModuleIds
@@ -1335,7 +1312,7 @@ function updateSelectedTrain() {
 }
 
 function updateTrainNameInput() {
-  const selectedTrain = scenario.trains.find((trainRecord) => trainRecord.id === selectedTrainId);
+  const selectedTrain = scenario.trains.find((trainRecord) => trainRecord.id === (selectedTrainId ?? activeTrainId));
   if (trainNameInput && selectedTrain) {
     trainNameInput.value = selectedTrain.displayName;
   }
@@ -1415,6 +1392,7 @@ function updatePropertiesPanel() {
 function updateReadout(validationWarnings = lastValidationWarnings) {
   const activeConflicts = scenario.conflicts.filter((conflictRecord) => conflictRecord.active);
   const enabledTrains = scenario.trains.filter((trainRecord) => trainRecord.enabled);
+  const actionableWarningCount = countActionableWarnings(validationWarnings);
   if (kpiTrains) {
     kpiTrains.textContent = String(enabledTrains.length);
   }
@@ -1422,12 +1400,12 @@ function updateReadout(validationWarnings = lastValidationWarnings) {
     kpiConflicts.textContent = String(activeConflicts.length);
   }
   if (kpiWarnings) {
-    kpiWarnings.textContent = String(validationWarnings.length);
+    kpiWarnings.textContent = String(actionableWarningCount);
   }
   renderValidationList(validationWarnings);
   const items = [
     `${enabledTrains.length} trains active across ${scenario.trackModules.length} planning objects.`,
-    `${scenario.connections.length} endpoint connections, ${validationWarnings.length} validation warnings.`,
+    `${scenario.connections.length} endpoint connections, ${actionableWarningCount} validation warnings.`,
     "Block occupancy shown as blue section bands.",
   ];
 
@@ -1439,7 +1417,7 @@ function updateReadout(validationWarnings = lastValidationWarnings) {
     items.push(`${conflictRecord.label}${trainNames ? `: ${trainNames}` : ""}`);
   });
 
-  validationWarnings.slice(0, 4).forEach((warningRecord) => {
+  validationWarnings.filter(isActionableValidationWarning).slice(0, 4).forEach((warningRecord) => {
     items.push(warningRecord.message);
   });
 
@@ -1527,13 +1505,69 @@ function getSelectedObject() {
 function setSelectedObject(selectionValue) {
   selectedModuleId = selectionValue?.type === "module" ? selectionValue.id : null;
   selectedConflictId = selectionValue?.type === "conflict" ? selectionValue.id : null;
-  if (selectionValue?.type === "train") {
-    selectedTrainId = selectionValue.id;
+  selectedTrainId = selectionValue?.type === "train" ? selectionValue.id : null;
+  if (selectedTrainId) {
+    activeTrainId = selectedTrainId;
   }
   if (selectionValue) {
     setInspectorTab("selection");
   }
   rebuildScenario();
+}
+
+function clearVisibleSelection() {
+  selectedModuleId = null;
+  selectedConflictId = null;
+  selectedTrainId = null;
+  updatePropertiesPanel();
+  rebuildScenario();
+}
+
+function beginObjectDrag(targetValue, pointerId) {
+  selectedModuleId = targetValue.type === "module" ? targetValue.id : null;
+  selectedConflictId = targetValue.type === "conflict" ? targetValue.id : null;
+  selectedTrainId = null;
+  dragState = {
+    type: targetValue.type,
+    id: targetValue.id,
+    historyCaptured: false,
+  };
+  orbitControls.enabled = false;
+  capturedPointerId = pointerId;
+  try {
+    renderer.domElement.setPointerCapture(pointerId);
+  } catch {
+    capturedPointerId = null;
+  }
+}
+
+function finishObjectDrag(pointerId) {
+  if (!dragState) {
+    return;
+  }
+  const completedDrag = dragState;
+  if (completedDrag.type === "module" && completedDrag.pendingConnection) {
+    scenario.connections.push({
+      fromModuleId: completedDrag.pendingConnection.target.moduleId,
+      fromPortId: completedDrag.pendingConnection.target.id,
+      toModuleId: completedDrag.id,
+      toPortId: completedDrag.pendingConnection.sourcePortId,
+    });
+  }
+  dragState = null;
+  orbitControls.enabled = true;
+  try {
+    renderer.domElement.releasePointerCapture(capturedPointerId ?? pointerId);
+  } catch {
+    // Pointer capture may already be released if the browser cancels the gesture.
+  }
+  capturedPointerId = null;
+  if (completedDrag.historyCaptured) {
+    rebuildScenario();
+    scheduleUrlUpdate();
+  } else {
+    requestRender();
+  }
 }
 
 function setObjectUserData(objectValue, objectType, objectId) {
@@ -1546,6 +1580,9 @@ function setObjectUserData(objectValue, objectType, objectId) {
 }
 
 function addScenarioObject(positionValue) {
+  if (activeTool === "select") {
+    return;
+  }
   const placementPlan = getPlacementPlan(positionValue);
   if (placementPlan.blocked) {
     return;
@@ -1567,6 +1604,7 @@ function addScenarioObject(positionValue) {
     };
     scenario.trains.push(trainRecord);
     selectedTrainId = trainRecord.id;
+    activeTrainId = trainRecord.id;
     selectedModuleId = null;
     selectedConflictId = null;
   } else if (activeTool === "conflict") {
@@ -1621,6 +1659,13 @@ function addScenarioObject(positionValue) {
 }
 
 function getPlacementPlan(positionValue) {
+  if (activeTool === "select") {
+    return {
+      position: [snapToGrid(positionValue.x), 0, snapToGrid(positionValue.z)],
+      mode: "select",
+      blocked: false,
+    };
+  }
   if (activeTool === "train" || activeTool === "conflict" || activeTool === "signal") {
     const nearestTrackPoint = getNearestTrackPoint(positionValue);
     const basePosition = nearestTrackPoint
@@ -1723,6 +1768,10 @@ function moveSelectedObjectToGround(positionValue) {
 }
 
 function updatePlacementPreview(positionValue) {
+  if (activeTool === "select") {
+    clearPlacementPreview();
+    return;
+  }
   currentPlacementPreview = getPlacementPlan(positionValue);
   clearGroup(previewGroup);
   const previewMaterial = currentPlacementPreview.blocked
@@ -1827,7 +1876,8 @@ function deleteSelected() {
     scenario.conflicts.forEach((conflictRecord) => {
       conflictRecord.affectedTrainIds = (conflictRecord.affectedTrainIds ?? []).filter((trainId) => trainId !== selectedTrainId);
     });
-    selectedTrainId = scenario.trains[0]?.id ?? null;
+    activeTrainId = scenario.trains.find((trainRecord) => trainRecord.enabled)?.id ?? scenario.trains[0]?.id ?? null;
+    selectedTrainId = null;
     rebuildScenario();
     scheduleUrlUpdate();
   }
@@ -1883,6 +1933,7 @@ function duplicateSelected() {
     };
     scenario.trains.push(duplicateTrain);
     selectedTrainId = duplicateTrain.id;
+    activeTrainId = duplicateTrain.id;
     rebuildScenario();
     scheduleUrlUpdate();
   }
@@ -1891,7 +1942,8 @@ function duplicateSelected() {
 function resetDemo() {
   pushHistory();
   scenario = cloneJson(defaultScenario);
-  selectedTrainId = scenario.trains[0]?.id ?? null;
+  activeTrainId = scenario.trains[0]?.id ?? null;
+  selectedTrainId = null;
   selectedModuleId = null;
   selectedConflictId = null;
   appState.time = 0;
@@ -1923,9 +1975,11 @@ function selectNearestModule(worldPoint) {
   if (nearestConflict && (!nearestModule || nearestConflict.distance < nearestModule.distance)) {
     selectedConflictId = nearestConflict.conflictRecord.id;
     selectedModuleId = null;
+    selectedTrainId = null;
   } else {
     selectedModuleId = nearestModule?.moduleRecord.id ?? null;
     selectedConflictId = null;
+    selectedTrainId = null;
   }
   rebuildScenario();
 }
@@ -2006,6 +2060,7 @@ function validateScenario() {
       if (!isPortConnected(moduleRecord.id, portRecord.id)) {
         warnings.push({
           type: "disconnected-port",
+          severity: "info",
           message: `${moduleRecord.name ?? moduleRecord.type} has open port ${portRecord.id}.`,
           position: portRecord.position,
           objectType: "module",
@@ -2135,7 +2190,7 @@ function rebuildScenario() {
 
   createConnectionOverlays();
   lastValidationWarnings = validateScenario();
-  createValidationOverlays(lastValidationWarnings);
+  createValidationOverlays(lastValidationWarnings.filter(isActionableValidationWarning));
   rebuildOccupancyBands();
   updateTrainNameInput();
   updateReadout(lastValidationWarnings);
@@ -2197,8 +2252,9 @@ function updateConflicts(elapsedTime) {
 }
 
 function updateCamera(deltaTime) {
-  if (followingTrain && selectedTrainId) {
-    const trainObject = trainObjects.get(selectedTrainId);
+  const followedTrainId = selectedTrainId ?? activeTrainId;
+  if (followingTrain && followedTrainId) {
+    const trainObject = trainObjects.get(followedTrainId);
     if (trainObject) {
       const forwardVector = new THREE.Vector3(0, 0, 1).applyQuaternion(trainObject.quaternion).normalize();
       const rightVector = new THREE.Vector3(forwardVector.z, 0, -forwardVector.x).normalize();
@@ -2264,6 +2320,9 @@ function syncControls() {
 
 function selectTool(toolName) {
   activeTool = toolName;
+  if (activeTool === "select") {
+    clearPlacementPreview();
+  }
   toolButtons.forEach((buttonElement) => {
     buttonElement.classList.toggle("is-active", buttonElement.dataset.tool === toolName);
   });
@@ -2314,6 +2373,7 @@ function wireInterface() {
   clearSelectionButton?.addEventListener("click", () => {
     selectedModuleId = null;
     selectedConflictId = null;
+    selectedTrainId = null;
     followingTrain = false;
     followTrainButton?.classList.remove("is-active");
     rebuildScenario();
@@ -2405,7 +2465,15 @@ function wireInterface() {
     if (!selectedModule) {
       return;
     }
-    selectedModule.rotation = (Number(moduleRotationInput.value) * Math.PI) / 180;
+    const nextRotation = (Number(moduleRotationInput.value) * Math.PI) / 180;
+    if (Math.abs((selectedModule.rotation ?? 0) - nextRotation) < 0.0001) {
+      return;
+    }
+    if (!moduleRotationHistoryCaptured) {
+      pushHistory();
+      moduleRotationHistoryCaptured = true;
+    }
+    selectedModule.rotation = nextRotation;
     if (moduleRotationValue) {
       moduleRotationValue.textContent = `${moduleRotationInput.value} deg`;
     }
@@ -2413,8 +2481,18 @@ function wireInterface() {
     rebuildScenario();
   });
 
-  moduleRotationInput?.addEventListener("pointerdown", pushHistory);
-  moduleRotationInput?.addEventListener("change", scheduleUrlUpdate);
+  moduleRotationInput?.addEventListener("pointerdown", () => {
+    moduleRotationHistoryCaptured = false;
+  });
+  moduleRotationInput?.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight" || event.key === "ArrowUp" || event.key === "ArrowDown") {
+      moduleRotationHistoryCaptured = false;
+    }
+  });
+  moduleRotationInput?.addEventListener("change", () => {
+    moduleRotationHistoryCaptured = false;
+    scheduleUrlUpdate();
+  });
 
   reconnectModuleButton?.addEventListener("click", () => {
     const selectedModule = selectedModuleId ? getModuleById(selectedModuleId) : null;
@@ -2580,8 +2658,10 @@ function wireInterface() {
     if (scenario.trains.length === 0) {
       return;
     }
-    const currentIndex = Math.max(0, scenario.trains.findIndex((trainRecord) => trainRecord.id === selectedTrainId));
+    const currentTrainId = selectedTrainId ?? activeTrainId;
+    const currentIndex = Math.max(0, scenario.trains.findIndex((trainRecord) => trainRecord.id === currentTrainId));
     selectedTrainId = scenario.trains[(currentIndex + 1) % scenario.trains.length].id;
+    activeTrainId = selectedTrainId;
     selectedModuleId = null;
     selectedConflictId = null;
     rebuildScenario();
@@ -2630,75 +2710,87 @@ function wireInterface() {
     }
     if (spacePanController.isActive()) {
       clearPlacementPreview();
+      canvasGestureController.reset();
       return;
     }
     if (event.ctrlKey || event.metaKey) {
+      canvasGestureController.reset();
       return;
     }
     const pickedObject = getPickedObject(event);
-    if (pickedObject) {
-      setSelectedObject(pickedObject);
-      if (pickedObject.type === "module" || pickedObject.type === "conflict") {
-        dragState = {
-          type: pickedObject.type,
-          id: pickedObject.id,
-          historyCaptured: false,
-        };
-        orbitControls.enabled = false;
-        renderer.domElement.setPointerCapture(event.pointerId);
-      }
-      return;
-    }
-    const groundPoint = pointerToGround(event);
-    if (event.shiftKey) {
-      selectNearestModule(groundPoint);
-      return;
-    }
-    addScenarioObject(groundPoint);
+    canvasGestureController.pointerDown({
+      clientX: event.clientX,
+      clientY: event.clientY,
+      target: pickedObject,
+      activeTool,
+      shiftKey: event.shiftKey,
+    });
   });
 
   renderer.domElement.addEventListener("pointermove", (event) => {
     if (spacePanController.isActive()) {
       clearPlacementPreview();
+      canvasGestureController.reset();
       return;
     }
     const groundPoint = pointerToGround(event);
-    if (dragState) {
+    const gestureAction = canvasGestureController.pointerMove({
+      clientX: event.clientX,
+      clientY: event.clientY,
+    });
+    if (gestureAction.type === "start-object-drag") {
+      if (gestureAction.target.type !== "module" && gestureAction.target.type !== "conflict") {
+        clearPlacementPreview();
+        return;
+      }
+      beginObjectDrag(gestureAction.target, event.pointerId);
       moveSelectedObjectToGround(groundPoint);
+      return;
+    }
+    if (gestureAction.type === "continue-object-drag" && dragState) {
+      moveSelectedObjectToGround(groundPoint);
+      return;
+    }
+    if (gestureAction.type === "start-pan" || gestureAction.type === "continue-pan") {
+      clearPlacementPreview();
       return;
     }
     updatePlacementPreview(groundPoint);
   });
 
   renderer.domElement.addEventListener("pointerup", (event) => {
-    if (!dragState) {
+    const groundPoint = pointerToGround(event);
+    const gestureAction = canvasGestureController.pointerUp({
+      clientX: event.clientX,
+      clientY: event.clientY,
+    });
+    if (gestureAction.type === "select") {
+      setSelectedObject(gestureAction.target);
       return;
     }
-    const completedDrag = dragState;
-    if (completedDrag.type === "module" && completedDrag.pendingConnection) {
-      scenario.connections.push({
-        fromModuleId: completedDrag.pendingConnection.target.moduleId,
-        fromPortId: completedDrag.pendingConnection.target.id,
-        toModuleId: completedDrag.id,
-        toPortId: completedDrag.pendingConnection.sourcePortId,
-      });
+    if (gestureAction.type === "select-nearest") {
+      selectNearestModule(groundPoint);
+      return;
     }
-    dragState = null;
-    orbitControls.enabled = true;
-    try {
-      renderer.domElement.releasePointerCapture(event.pointerId);
-    } catch {
-      // Pointer capture may already be released if the browser cancels the gesture.
+    if (gestureAction.type === "place") {
+      addScenarioObject(groundPoint);
+      return;
     }
-    if (completedDrag.historyCaptured) {
-      rebuildScenario();
-      scheduleUrlUpdate();
-    } else {
-      requestRender();
+    if (gestureAction.type === "clear-selection") {
+      clearVisibleSelection();
+      return;
+    }
+    if (gestureAction.type === "end-object-drag") {
+      finishObjectDrag(event.pointerId);
     }
   });
 
-  renderer.domElement.addEventListener("pointerleave", clearPlacementPreview);
+  renderer.domElement.addEventListener("pointerleave", () => {
+    clearPlacementPreview();
+    if (!dragState) {
+      canvasGestureController.reset();
+    }
+  });
 
   window.addEventListener("keydown", (event) => {
     spacePanController.handleKeyDown(event);
@@ -2733,6 +2825,7 @@ function wireInterface() {
     if (event.key === "Escape") {
       selectedModuleId = null;
       selectedConflictId = null;
+      selectedTrainId = null;
       followingTrain = false;
       followTrainButton?.classList.remove("is-active");
       rebuildScenario();
@@ -2774,6 +2867,9 @@ function hydrateViewState() {
   scenario.trains.forEach((trainRecord) => {
     trainRecord.selectedRouteId = trainRecord.selectedRouteId ?? trainRecord.route ?? "main";
   });
+  if (!scenario.trains.some((trainRecord) => trainRecord.id === activeTrainId)) {
+    activeTrainId = scenario.trains.find((trainRecord) => trainRecord.enabled)?.id ?? scenario.trains[0]?.id ?? null;
+  }
   if (snapEnabledInput) snapEnabledInput.checked = appState.snapEnabled;
   if (labelsToggle) labelsToggle.checked = appState.overlays.labels;
   if (conflictsToggle) conflictsToggle.checked = appState.overlays.conflicts;
