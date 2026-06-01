@@ -18,6 +18,7 @@ import {
   normalizeRotation,
   worldPosition,
 } from "./scene/trackGeometry.js";
+import { createSpacePanController } from "./utils/interactionModes.js";
 import { cloneJson } from "./utils/serialization.js";
 import { getDomRefs } from "./ui/dom.js";
 
@@ -146,6 +147,9 @@ orbitControls.enableDamping = true;
 orbitControls.dampingFactor = 0.08;
 orbitControls.enablePan = true;
 orbitControls.screenSpacePanning = true;
+orbitControls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
+orbitControls.mouseButtons.MIDDLE = THREE.MOUSE.DOLLY;
+orbitControls.mouseButtons.RIGHT = THREE.MOUSE.PAN;
 orbitControls.minDistance = 12;
 orbitControls.maxDistance = 115;
 orbitControls.minPolarAngle = Math.PI * 0.08;
@@ -215,6 +219,17 @@ const textTextureCache = new Map();
 const maxHistoryEntries = 40;
 const snapTolerance = 3.1;
 const placementOverlapTolerance = 2.8;
+
+const spacePanController = createSpacePanController({
+  bodyClassList: document.body.classList,
+  orbitControls,
+  mousePanValue: THREE.MOUSE.PAN,
+  mouseRotateValue: THREE.MOUSE.ROTATE,
+  onChange: () => {
+    clearPlacementPreview();
+    requestRender();
+  },
+});
 
 const appState = {
   running: false,
@@ -541,7 +556,7 @@ function applySceneTheme() {
   materials.signalRed.color.set(colorConfig.conflict);
   materials.signalRed.emissive.set(colorConfig.conflict);
   if (titleOverlay) {
-    titleOverlay.style.borderLeftColor = colorConfig.accent;
+    titleOverlay.style.borderLeftColor = "var(--ui-accent)";
   }
   if (overlayAuthor) overlayAuthor.textContent = scenario.meta.author;
   if (overlayTitle) overlayTitle.textContent = scenario.meta.title;
@@ -730,7 +745,7 @@ function createTextTexture(textValue, options = {}) {
   roundRect(context, 8, 8, width - 16, height - 16, 18);
   context.stroke();
   context.fillStyle = fg;
-  context.font = `700 ${options.fontSize ?? 46}px Inter, Segoe UI, Arial, sans-serif`;
+  context.font = `700 ${options.fontSize ?? 46}px Helvetica Neue, Helvetica, Arial, sans-serif`;
   context.textAlign = "center";
   context.textBaseline = "middle";
   context.fillText(textValue, width * 0.5, height * 0.52, width - 42);
@@ -777,14 +792,14 @@ function createTitleCardTexture() {
   roundRect(context, 18, 18, 12, canvas.height - 36, 8);
   context.fill();
   context.fillStyle = colorsConfig.accent;
-  context.font = "700 34px Inter, Segoe UI, Arial, sans-serif";
+  context.font = "700 34px Helvetica Neue, Helvetica, Arial, sans-serif";
   context.textBaseline = "top";
   context.fillText(scenario.meta.author, 54, 42, 900);
   context.fillStyle = colorsConfig.label;
-  context.font = "800 64px Inter, Segoe UI, Arial, sans-serif";
+  context.font = "800 64px Helvetica Neue, Helvetica, Arial, sans-serif";
   context.fillText(scenario.meta.title, 54, 82, 900);
   context.fillStyle = "#475569";
-  context.font = "500 36px Inter, Segoe UI, Arial, sans-serif";
+  context.font = "500 36px Helvetica Neue, Helvetica, Arial, sans-serif";
   context.fillText(scenario.meta.subtitle, 54, 158, 900);
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
@@ -2613,6 +2628,10 @@ function wireInterface() {
     if (event.button !== 0 || event.target !== renderer.domElement) {
       return;
     }
+    if (spacePanController.isActive()) {
+      clearPlacementPreview();
+      return;
+    }
     if (event.ctrlKey || event.metaKey) {
       return;
     }
@@ -2639,6 +2658,10 @@ function wireInterface() {
   });
 
   renderer.domElement.addEventListener("pointermove", (event) => {
+    if (spacePanController.isActive()) {
+      clearPlacementPreview();
+      return;
+    }
     const groundPoint = pointerToGround(event);
     if (dragState) {
       moveSelectedObjectToGround(groundPoint);
@@ -2678,7 +2701,15 @@ function wireInterface() {
   renderer.domElement.addEventListener("pointerleave", clearPlacementPreview);
 
   window.addEventListener("keydown", (event) => {
-    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) {
+    spacePanController.handleKeyDown(event);
+    if (spacePanController.isActive()) {
+      return;
+    }
+    if (
+      event.target instanceof HTMLInputElement ||
+      event.target instanceof HTMLSelectElement ||
+      event.target instanceof HTMLTextAreaElement
+    ) {
       return;
     }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
@@ -2706,6 +2737,14 @@ function wireInterface() {
       followTrainButton?.classList.remove("is-active");
       rebuildScenario();
     }
+  });
+
+  window.addEventListener("keyup", (event) => {
+    spacePanController.handleKeyUp(event);
+  });
+
+  window.addEventListener("blur", () => {
+    spacePanController.reset();
   });
 
   orbitControls.addEventListener("start", () => {
