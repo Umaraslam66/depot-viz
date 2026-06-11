@@ -1,6 +1,6 @@
 import { Canvas, useFrame } from "@react-three/fiber";
 import { MapControls } from "@react-three/drei";
-import { ACESFilmicToneMapping } from "three";
+import { ACESFilmicToneMapping, PCFShadowMap } from "three";
 import { Ground } from "./Ground";
 import { Lighting } from "./Lighting";
 import { TrackModules } from "./TrackModules";
@@ -30,7 +30,7 @@ export default function WorldCanvas() {
   const dragging = useUiStore((s) => s.draggingId !== null);
   return (
     <Canvas
-      shadows
+      shadows={{ type: PCFShadowMap }}
       dpr={QUALITY_DPR[quality]}
       camera={{ position: [0, 34, 34], fov: 42 }}
       gl={{ antialias: true, toneMapping: ACESFilmicToneMapping, preserveDrawingBuffer: true }}
