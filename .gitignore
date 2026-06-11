@@ -6,3 +6,4 @@ rail-scenario-*.png
 rail-scenario-*.webm
 exports/
 recordings/
+.worktrees/
