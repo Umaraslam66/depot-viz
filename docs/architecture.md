@@ -1,54 +1,42 @@
 # Architecture
 
-Rail Scenario Planner is a static Three.js application. The browser loads `index.html`, the import map resolves Three.js from jsDelivr, and `src/main.js` wires the scenario state, UI events, Three.js scene, and animation loop together.
+Rail Story Studio is a Vite + React + TypeScript application. react-three-fiber renders the 3D world; zustand stores hold all state; pure domain logic lives in `src/sim/` with no React or Three.js imports.
 
 ## Runtime Flow
 
-1. `src/ui/dom.js` collects DOM references from `index.html`.
-2. `src/config/scenario.js` provides the built-in demo scenario and version constants.
-3. `src/state/scenarioStore.js` restores a scenario from the URL first, then browser autosave, then the built-in demo.
-4. `src/main.js` creates the WebGL renderer, scene, camera, controls, groups, app state, and event handlers.
-5. Scene rebuilds convert scenario records into Three.js objects with stable `userData.objectType` and `userData.objectId` values for raycast selection.
-6. The render loop runs on demand, staying active during playback, recording, camera moves, dragging, URL updates, and autosave.
+1. `src/main.tsx` loads the initial scenario (localStorage autosave → built-in demo), clears undo history, starts the debounced autosave subscription, and mounts React.
+2. `src/App.tsx` lays out the floating panels over the lazy-loaded `WorldCanvas`.
+3. `src/world/WorldCanvas.tsx` creates the R3F `<Canvas>` (ACES tone mapping, shadow maps, quality-driven device pixel ratio), the daylight rig, the base plate, and `MapControls`.
+4. World components subscribe to the stores and rebuild meshes when records change.
+5. `SimDriver` advances `simClock.time` inside `useFrame` while playback is on; trains sample their route curve from that clock every frame without re-rendering React.
 
 ## State Model
 
-The editable scenario is stored in one object with:
+Three layers:
 
-- `meta`: title, subtitle, author, notes, theme, and colors.
-- `exports`: playback export defaults.
-- `trackModules`: placed infrastructure modules.
-- `connections`: endpoint-to-endpoint rail joins.
-- `trains`: named moving train records.
-- `conflicts`: explainable operational issue markers.
-- `view`: overlays, speed, snap, presentation mode, and camera preset.
+- **`useWorldStore`** (`src/state/worldStore.ts`) — the editable document: track modules, connections, trains, conflicts, scenario meta, story (shots/annotations arrive in Plan 2), and the id counter. Wrapped in zundo's `temporal` middleware: every set produces an undo snapshot (limit 50). All mutations go through named actions (`placeModule`, `moveModule`, `updateTrain`, …) that delegate planning to `src/sim/`.
+- **`useUiStore`** (`src/state/uiStore.ts`) — transient editor state: active tool, selection, placement rotation, snap toggle, playback flag, sim speed, render quality, drag state, save status. Never persisted, never undoable.
+- **`simClock`** (`src/world/simClock.ts`) — a mutable `{ time }` singleton advanced in the render loop. Keeping it out of React/zustand means 60 fps train animation with zero re-renders, and a later export pipeline can drive it deterministically.
 
-Transient runtime state lives in `appState` and local module variables inside `src/main.js`. Undo/redo snapshots capture both scenario state and relevant editor state.
+## Domain Logic (`src/sim/`)
+
+Pure, unit-tested modules:
+
+- `geometry.ts` — module-local→world transforms, port definitions per module type.
+- `railGraph.ts` — longest-path search over the connection graph.
+- `routes.ts` — connected components → named routes (`route-1`, …) and waypoint polylines.
+- `snapping.ts` — magnetic endpoint snapping, grid snapping, placement/move planning with overlap rejection.
+- `validation.ts` — warnings: open ports (info), overlaps, missing routes, disabled trains, empty conflict scope.
+- `serialization.ts` — JSON v2 serialize/parse with structural validation.
 
 ## Rendering Model
 
-The scene is organized into groups:
+- `TrackModules` renders each record through stylized mesh components (`trackMeshes.tsx`); selection shows a coral ring; pointer drag re-plans position through `planModuleMove`.
+- `Trains` derives routes from connections (memoized), builds Catmull-Rom curves through module centers, and animates along arc length.
+- `Conflicts` renders pulsing severity-colored cones with rings.
+- Labels are canvas-texture sprites (`ModuleLabel`), not troika text — troika's worker-based SDF generation can drop the WebGL context on some ANGLE/Metal setups.
+- WebGL context loss is tolerated: the `webglcontextlost` handler prevents default so the browser can restore the context.
 
-- `scenarioGroup`: infrastructure modules.
-- `trainGroup`: animated train objects.
-- `overlayGroup`: paths, connections, occupancy, validation, and conflict objects.
-- `labelGroup`: sprite labels.
-- `previewGroup`: placement feedback.
+## Persistence
 
-Track modules are rebuilt from records whenever the scenario changes. Trains are animated along either built-in fallback curves or a connected route generated from module connections. When playback is stopped, the canvas renders only after an interaction or state change.
-
-## Interaction Model
-
-Pointer raycasting selects modules, trains, and conflicts. Blank canvas clicks place the active prefab. Dragging selected modules or conflicts updates their position with magnetic endpoint snapping where possible and grid snapping otherwise.
-
-Keyboard shortcuts are handled in `src/main.js`:
-
-- `R`: rotate active tool.
-- `Delete`: delete selected item.
-- `Ctrl+Z`: undo.
-- `Ctrl+Y`: redo.
-- `Esc`: clear editing selection.
-
-## Persistence And Export
-
-URL sharing and browser autosave use the same serializable scenario snapshot. JSON export is the durable project format. PNG and WEBM exports use the active canvas; playback export temporarily enables presentation mode, records the requested duration, then restores the prior playback state.
+`src/state/persistence.ts`: debounced (800 ms) autosave of the full scenario snapshot to localStorage on every world-store change, with save status surfaced in the top bar. JSON v2 export/import via file download/picker. Corrupt or wrong-version saves fall back to the demo scenario.

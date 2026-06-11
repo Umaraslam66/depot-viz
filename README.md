@@ -1,75 +1,65 @@
-# Rail Scenario Planner
+# Rail Story Studio
 
-Rail Scenario Planner is a browser-based 3D workbench for explaining railway planning, operations, and conflicts to stakeholders. It is intentionally lightweight: a static Three.js app with no backend, no accounts, and no build step.
+Rail Story Studio is a browser-based 3D studio for explaining railway planning, operations, and conflicts to stakeholders. A planner builds a stylized miniature rail world, and (in upcoming releases) frames a storyboard of camera shots and exports a stakeholder-ready video.
 
-The planner is not a CAD or signalling simulator. It is a visual scenario demonstrator for discussions around track layouts, train movements, platform occupation, junction pressure, blocked sections, headway, and delay propagation.
+This is the foundation release: a full editor for the miniature world with build-tool parity to the previous Rail Scenario Planner, rebuilt on a modern stack.
 
-## Live Deployment
+## Stack
 
-This repository is designed for GitHub Pages. After pushing to `main`, enable Pages from the repository settings and serve from the root of the `main` branch.
+- Vite + React + TypeScript
+- three.js via @react-three/fiber and @react-three/drei
+- zustand state (zundo undo/redo)
+- Vitest
 
-Expected project URL format:
-
-```text
-https://umaraslam66.github.io/depot-viz/
-```
-
-## Local Use
-
-Serve the repository with any static web server:
+## Develop
 
 ```bash
-python -m http.server 5173
+npm install
+npm run dev      # local dev server
+npm test         # unit + smoke tests
+npm run build    # production build to dist/
 ```
-
-Open:
-
-```text
-http://localhost:5173/
-```
-
-Opening `index.html` directly is not recommended because ES modules and browser security rules work best through a local server.
 
 ## Features
 
-- Professional rail planning canvas with a neutral grid, labels, legend, KPI readouts, and operational camera presets.
-- Prefab placement for straight track, curves, turnouts, stations, signals, trains, and conflict markers.
-- Magnetic endpoint snapping for track modules, plus grid fallback placement.
-- Direct selection, dragging, rotation, delete, duplicate, undo, redo, reset, and route rebuild controls.
-- Editable train names, train colors, train speed, enabled state, and route assignment.
-- Conflict overlays for headway, junction, platform, blocked section, and delay scenarios.
-- Validation panel for disconnected ports, overlaps, incomplete connected routes, disabled trains, and incomplete conflict scopes.
-- Presentation mode with title/subtitle/author metadata, configurable themes, PNG export, and WEBM playback export when supported by the browser.
-- URL sharing, JSON import/export, and local browser autosave.
-- Render quality control and paused-by-default playback for better performance during workshops.
+- Stylized miniature world: daylight lighting, rounded base plate, toy-like track, stations, signals, trains, conflict markers.
+- Build tools: straight, curve, turnout, station, signal, train, conflict placement with magnetic endpoint snapping and grid fallback.
+- Direct manipulation: select, drag with snapping, rotate, duplicate, delete, undo/redo, keyboard shortcuts (R, Delete, Ctrl+Z/Y, Esc).
+- Trains follow routes derived from track connections; per-train name, color, speed, route, enabled state.
+- Live validation: open ports, overlaps, route availability, disabled trains, conflict scope.
+- Persistence: localStorage autosave, JSON v2 export/import, built-in demo scenario.
+
+## Roadmap
+
+- **Director & Environments** — environment mood presets (Daylight, Golden Hour, Night Ops, Overcast), storyboard of camera shots, annotations, present mode.
+- **Video Export** — deterministic frame-by-frame rendering to MP4 (WebCodecs) with WEBM fallback.
+
+See `docs/superpowers/specs/2026-06-11-frontend-revamp-design.md` for the full design.
 
 ## Project Structure
 
 ```text
-index.html              Static application shell
-src/main.js             Runtime orchestration and render loop
-src/config/             Default scenario and visual theme presets
-src/state/              Scenario normalization, URL load, browser restore
-src/scene/              Three.js scene helpers, materials, camera presets
-src/ui/                 DOM reference collection
-src/export/             Download/export helpers
-src/utils/              Small shared utilities
-src/styles/app.css      Workbench styling
+index.html              Vite entry
+src/main.tsx            Bootstrap: load scenario, start autosave, mount React
+src/App.tsx             Layout: canvas + floating panels
+src/sim/                Pure domain logic (no React/Three): geometry, graph,
+                        routes, snapping, validation, serialization, demo
+src/state/              zustand stores (world undoable, ui transient), persistence
+src/world/              R3F scene: canvas, lighting, ground, track, trains, conflicts
+src/ui/                 Floating panels: top bar, toolbar, inspector, project, validation
+src/export/             Download helpers (video export arrives with Plan 3)
+tests/                  Vitest suites mirroring src/sim and src/state
 docs/                   Architecture, scenario format, deployment notes
-NOTICE.md               Provenance and licensing note
 ```
 
-## Persistence And Sharing
+## Data
 
-- Browser autosave uses `localStorage`.
-- URL sharing serializes the active scenario into the `?scenario=` query parameter.
-- JSON export is the recommended long-form workshop/project format.
-- WEBM export uses `canvas.captureStream()` and `MediaRecorder`; unsupported browsers fall back to PNG export.
+Scenarios are saved as JSON v2 (see `docs/scenario-format.md`). This is a clean break from the v1 Rail Scenario Planner format — v1 files and share URLs are not importable.
 
 ## Browser Support
 
-Use a modern Chromium, Edge, or Firefox browser with WebGL enabled. WEBM recording depends on `MediaRecorder` support and may vary by browser, platform, and graphics settings.
+Modern Chromium, Edge, or Firefox with WebGL.
 
 ## Provenance
 
-This repository should be published as a clean project history. See [NOTICE.md](NOTICE.md) for the provenance and licensing note.
+See [NOTICE.md](NOTICE.md) for the provenance and licensing note.
