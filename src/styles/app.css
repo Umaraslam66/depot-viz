@@ -18,3 +18,56 @@ body {
   overflow: hidden;
 }
 .app-shell { position: relative; height: 100%; background: #cfe9e3; }
+
+.panel {
+  position: absolute;
+  background: var(--panel-bg);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--panel-radius);
+  box-shadow: var(--panel-shadow);
+  padding: 10px 12px;
+  z-index: 10;
+}
+.panel h2 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+}
+.top-bar { top: 14px; left: 14px; right: 14px; display: flex; align-items: center; gap: 14px; }
+.top-bar .title { font-weight: 650; font-size: 15px; margin-right: auto; }
+.toolbar { top: 72px; left: 14px; display: flex; flex-direction: column; gap: 4px; width: 116px; }
+.inspector { top: 72px; right: 14px; width: 240px; max-height: calc(100% - 160px); overflow-y: auto; }
+.validation { bottom: 14px; left: 14px; width: 280px; max-height: 200px; overflow-y: auto; }
+
+button {
+  font: inherit;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink);
+  border-radius: 9px;
+  padding: 6px 10px;
+  cursor: pointer;
+  text-align: left;
+}
+button:hover { background: rgba(40, 60, 50, 0.07); }
+button.is-active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+button.primary { background: var(--accent); color: #fff; text-align: center; }
+button.primary:hover { background: #d44e30; }
+
+.field { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; font-size: 12px; color: var(--ink-soft); }
+.field input[type="text"], .field textarea, .field select {
+  font: inherit; color: var(--ink);
+  border: 1px solid rgba(40, 60, 50, 0.18);
+  border-radius: 8px; padding: 6px 8px; background: rgba(255, 255, 255, 0.7);
+}
+.field-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; margin-bottom: 8px; }
+.hint { font-size: 12px; color: var(--ink-soft); }
+.issue { font-size: 12px; padding: 5px 0; border-bottom: 1px solid rgba(40, 60, 50, 0.08); }
+.issue.info { color: var(--ink-soft); }
+.issue.warning { color: var(--warn); }
+.status { font-size: 12px; color: var(--ink-soft); }
