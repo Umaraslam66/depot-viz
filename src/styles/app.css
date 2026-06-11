@@ -1,0 +1,20 @@
+:root {
+  --panel-bg: rgba(255, 255, 255, 0.82);
+  --panel-border: rgba(255, 255, 255, 0.6);
+  --panel-shadow: 0 8px 28px rgba(40, 60, 50, 0.18);
+  --panel-radius: 14px;
+  --ink: #28323b;
+  --ink-soft: #5d6b75;
+  --accent: #e85d3d;
+  --accent-soft: #fbe3db;
+  --ok: #4f9d69;
+  --warn: #d97706;
+}
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--ink);
+  overflow: hidden;
+}
+.app-shell { position: relative; height: 100%; background: #cfe9e3; }
