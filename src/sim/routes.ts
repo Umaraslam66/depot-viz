@@ -58,7 +58,7 @@ export function routeWaypoints(world: WorldState, route: RouteInfo): [number, nu
     .map((m) => [m.position[0], TRAIN_HEIGHT, m.position[2]]);
 }
 
-export function resolveTrainRoute(world: WorldState, routeId: string | null, routes: RouteInfo[]): RouteInfo | null {
+export function resolveTrainRoute(_world: WorldState, routeId: string | null, routes: RouteInfo[]): RouteInfo | null {
   if (routes.length === 0) return null;
   return routes.find((r) => r.id === routeId) ?? routes[0];
 }
