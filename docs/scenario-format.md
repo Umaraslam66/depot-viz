@@ -1,56 +1,47 @@
-# Scenario Format
+# Scenario Format (JSON v2)
 
-Scenario files are JSON exports of the active planner state. The same shape is used for URL sharing and browser autosave.
+Scenario files are JSON exports of the full studio state. The same shape is used for browser autosave. Version 2 is a clean break: v1 Rail Scenario Planner files and share URLs are not importable.
 
 ## Top-Level Fields
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "nextId": 20,
   "meta": {},
-  "exports": {},
-  "trackModules": [],
-  "connections": [],
-  "trains": [],
-  "conflicts": [],
-  "view": {}
+  "world": {
+    "trackModules": [],
+    "connections": [],
+    "trains": [],
+    "conflicts": []
+  },
+  "story": {
+    "shots": [],
+    "annotations": []
+  }
 }
 ```
 
+- `version`: always `2`. Parsers reject any other value.
+- `nextId`: shared counter for allocating new `m…`/`t…`/`c…` ids.
+
 ## `meta`
 
-Presentation metadata shown in the app, PNG export, and playback export.
-
-- `title`: scenario title.
-- `subtitle`: short explanatory line.
+- `title`: project title shown in the top bar.
 - `author`: author, client, or project label.
 - `notes`: workshop notes.
-- `theme`: one of `professional`, `safety`, `night`, or `neutral`.
-- `colors`: `accent`, `path`, `conflict`, and `label` hex colors.
 
-## `exports`
-
-Playback export defaults.
-
-- `playbackDuration`: duration in seconds.
-- `playbackFps`: requested recording frame rate.
-- `playbackSpeed`: playback speed multiplier during export.
-- `resetOnExport`: whether recording starts from scenario time zero.
-
-## `trackModules`
-
-Infrastructure records.
+## `world.trackModules`
 
 - `id`: stable module id, usually `m<number>`.
 - `type`: `straight`, `curve`, `turnout`, `station`, or `signal`.
 - `position`: `[x, y, z]` world position.
-- `rotation`: Y-axis rotation in radians.
+- `rotation`: Y-axis rotation in radians, normalized to `[0, 2π)`.
 - `name`: optional display name for stations, junctions, and signals.
 
-Rail-capable modules derive their ports from `type` and `rotation`; port world coordinates are not stored in JSON.
+Rail-capable modules derive their ports from `type` and `rotation`; port world coordinates are not stored.
 
-## `connections`
+## `world.connections`
 
 Endpoint-to-endpoint rail joins.
 
@@ -59,22 +50,17 @@ Endpoint-to-endpoint rail joins.
 
 Ports are named `A` and `B` for straight/station/curve modules. Turnouts use `A`, `B`, and `C`.
 
-## `trains`
-
-Animated train records.
+## `world.trains`
 
 - `id`: stable train id, usually `t<number>`.
-- `displayName`: visible train label.
+- `name`: visible train label.
 - `color`: train body hex color.
-- `route`: fallback route id.
-- `selectedRouteId`: active route, usually `main`, `branch`, or `connected`.
-- `speed`: movement speed along the route.
+- `speed`: movement speed in world units per simulated second.
 - `startOffset`: route offset from `0` to `1`.
-- `enabled`: whether the train is active and visible.
+- `enabled`: whether the train moves (disabled trains park, greyed).
+- `routeId`: a route id such as `route-1`, or `null` for the first available route. Routes are derived at runtime from connections (one per connected component, ordered by module placement).
 
-## `conflicts`
-
-Explainable operations markers.
+## `world.conflicts`
 
 - `id`: stable conflict id, usually `c<number>`.
 - `type`: `headway`, `junction`, `platform`, `blocked`, or `delay`.
@@ -83,15 +69,11 @@ Explainable operations markers.
 - `affectedModuleIds`: related infrastructure ids.
 - `affectedTrainIds`: related train ids.
 - `label`: stakeholder-facing issue label.
-- `active`: whether the marker appears in overlays and readouts.
+- `active`: whether the marker pulses and counts in validation.
 
-## `view`
+## `story`
 
-Planner view and overlay state.
+Defined in the format now so files stay stable; authored by the Director release (Plan 2).
 
-- `preset`: active camera preset.
-- `speed`: timeline speed.
-- `quality`: render quality, one of `performance`, `balanced`, or `high`.
-- `snapEnabled`: magnetic snapping toggle.
-- `presentationMode`: presentation mode toggle.
-- `overlays`: booleans for labels, conflicts, blocks, paths, connections, and validation.
+- `shots`: ordered camera shots. Each shot stores a name, duration in seconds, a camera (`framed` position/target, `orbit` target/radius/height, or `follow` trainId/distance), an environment (`preset`, `sunAzimuth`, `fogAmount`), a simulation speed, an optional caption, visible annotation ids, and a transition (`fly` or `cut`).
+- `annotations`: 3D callouts. Each has an id, text, and a target (`module`, `train`, or `conflict` plus the target id).

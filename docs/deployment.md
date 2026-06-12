@@ -1,43 +1,33 @@
 # Deployment
 
-Rail Scenario Planner is a static site and can be deployed directly with GitHub Pages.
+Rail Story Studio builds to a static bundle (`npm run build` → `dist/`) and can be hosted on any static host: GitHub Pages, Vercel, Netlify, or Railway static serving. `vite.config.ts` uses `base: "./"`, so the bundle works from a domain root or a sub-path.
 
 ## GitHub Pages
 
-1. Push the latest `main` branch to `Umaraslam66/depot-viz`.
-2. Open repository settings on GitHub.
-3. Go to **Pages**.
-4. Set source to **Deploy from a branch**.
-5. Select branch `main` and folder `/`.
-6. Save and wait for GitHub Pages to publish.
+GitHub Pages can no longer serve the repository root directly — the app needs a build step. Use an Actions workflow that runs `npm ci && npm run build` and publishes `dist/`, or push the built `dist/` to a `gh-pages` branch.
 
-The expected URL is:
+## Vercel
 
-```text
-https://umaraslam66.github.io/depot-viz/
+```bash
+vercel
 ```
+
+Framework preset: Vite. Build command `npm run build`, output directory `dist`. No environment variables required.
 
 ## Local Smoke Test Before Publishing
 
-Run a local static server:
-
 ```bash
-python -m http.server 5173
+npm run build
+npx vite preview
 ```
 
-Open:
-
-```text
-http://localhost:5173/
-```
-
-Check that the default scenario renders, module imports load without console errors, and basic editing/export controls work.
+Check that the demo scenario renders, playback animates trains, editing works, and autosave round-trips a reload without console errors.
 
 ## Provenance And Licensing
 
 The project was rewritten and published as a clean project history because the original cloned source did not include a local license file. Keep `NOTICE.md` with the repository so provenance remains clear.
 
-Three.js is loaded from jsDelivr and is distributed under the MIT license by its authors.
+Three.js, React, and all dependencies are installed from npm under their respective licenses (MIT).
 
 ## Generated Files
 
